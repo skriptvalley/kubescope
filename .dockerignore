@@ -1,0 +1,16 @@
+.git
+.github
+.claude
+bin
+dist
+web/dist
+web/node_modules
+node_modules
+docs
+prompts
+*.md
+.env*
+.DS_Store
+LICENSE
+Makefile
+deploy
