@@ -11,6 +11,7 @@ docker run --rm -p 8080:8080 -v ~/.kube/config:/kubeconfig:ro ghcr.io/skriptvall
 Then open http://localhost:8080.
 
 - Your kubeconfig is mounted **read-only** at `/kubeconfig` inside the container.
+- **Linux:** the container runs as a non-root user, and a bind mount keeps the host file's owner and mode — a typical `0600` kubeconfig is unreadable inside. Add `--user "$(id -u):$(id -g)"` to the `docker run`. (macOS/Windows file sharing remaps ownership, so this isn't needed there.)
 - **Local clusters** (kind/minikube/k3d) advertise the API server on `127.0.0.1`, which inside a container is the container itself. Add `--network host` on Linux, or rewrite the server address to `host.docker.internal` on Mac/Windows. Details and other auth gotchas (exec plugins, file-path certs): [docs/adr/0004-cluster-auth-and-kubeconfig-in-docker.md](docs/adr/0004-cluster-auth-and-kubeconfig-in-docker.md).
 
 ## Status

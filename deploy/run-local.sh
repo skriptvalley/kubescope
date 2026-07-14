@@ -21,10 +21,14 @@ kubeconfig="$workdir/kubeconfig"
 
 kind get kubeconfig --name "$KIND_CLUSTER" > "$kubeconfig"
 
+# No exec: the EXIT trap must still fire to remove the credentials copy.
 case "$(uname -s)" in
   Linux)
     echo ">> Linux: using --network host with the kind kubeconfig as-is"
-    exec docker run --rm --network host \
+    # --user: the image runs as nonroot (uid 65532); a bind mount keeps host
+    # ownership/mode, so run as the host user to keep the kubeconfig readable.
+    docker run --rm --network host \
+      --user "$(id -u):$(id -g)" \
       -v "$kubeconfig:/kubeconfig:ro" \
       -e KUBESCOPE_LISTEN_ADDR="0.0.0.0:$PORT" \
       "$IMAGE"
@@ -35,7 +39,7 @@ case "$(uname -s)" in
       -e 's#server: https://127.0.0.1:#server: https://host.docker.internal:#' \
       -e 's#certificate-authority-data:.*#insecure-skip-tls-verify: true#' \
       "$kubeconfig"
-    exec docker run --rm -p "$PORT:8080" \
+    docker run --rm -p "$PORT:8080" \
       -v "$kubeconfig:/kubeconfig:ro" \
       "$IMAGE"
     ;;

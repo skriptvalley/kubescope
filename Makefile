@@ -61,7 +61,8 @@ docker-build-local: ## Build a host-arch image into the local docker store
 	docker buildx build -f build/Dockerfile -t $(IMAGE) --load .
 
 docker-run: ## Run the image with ~/.kube/config mounted read-only
-	docker run --rm -p 8080:8080 -v $(HOME)/.kube/config:/kubeconfig:ro $(IMAGE)
+	docker run --rm -p 8080:8080 --user "$$(id -u):$$(id -g)" \
+		-v $(HOME)/.kube/config:/kubeconfig:ro $(IMAGE)
 
 ## --- kind / smoke ---
 
