@@ -28,8 +28,22 @@ docs(adr): accept 0006 — SSE for watch/logs, WebSocket for exec
 
 - One PR per story; one PR per sprint is acceptable when working solo and the sprint is small.
 - Self-review checklist = Definition of Done (see [../CLAUDE.md](../CLAUDE.md) and [CONTRIBUTING.md](CONTRIBUTING.md)).
-- Squash-merge into `main`; keep the squash commit subject Conventional.
+- Every PR gets an **agent code review** of its diff before merge; real findings are fixed on the branch pre-merge, or logged as `FB-N` in [../STATUS.md](../STATUS.md) if they can wait.
+- **Merge gate:** `make test`, `make lint`, `make fe-test` green. Until CI lands (Sprint 8, Story 8.3) these run locally and are the gate; after that, green CI on the PR is required.
+- Squash-merge into `main`; keep the squash commit subject Conventional. Delete the branch on merge.
 - Review feedback that outlives the PR goes into [../STATUS.md](../STATUS.md) under "Feedback / Review Tasks".
+
+## Session-end state (non-negotiable)
+
+A working session does not end with an open PR. The closing sequence is:
+
+1. Gates green (test/lint/fe-test; CI once it exists).
+2. Agent review done, findings resolved or logged.
+3. Squash-merge the PR (Conventional subject), delete the remote branch.
+4. Sync local: `git checkout main && git pull --prune`; delete the local branch.
+5. End state: local `main` == `origin/main`, working tree clean — the next session starts from `main` with no leftovers.
+
+If something genuinely blocks the merge (broken gate, unresolved review finding), leave the PR open, log the blocker in `STATUS.md` as the top item under "Feedback / Review Tasks", and say so in the session summary.
 
 ## Versioning & tags
 

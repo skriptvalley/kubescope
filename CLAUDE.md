@@ -95,6 +95,7 @@ Full model: [docs/GIT-BRANCHING.md](docs/GIT-BRANCHING.md). Summary:
 - Trunk-based; `main` protected and always releasable; short-lived branches `sprint-<N>/<story-slug>` (feedback: `fix/<slug>`).
 - Conventional Commits: `feat|fix|refactor|test|docs|chore|build|ci(scope): subject`; one logical change per commit.
 - One PR per story (or per sprint if solo and small); squash-merge; semver tags `v0.<sprint-milestone>.<patch>` from Sprint 8.
+- PRs merge in the same session: agent review + green gates (`make test`/`lint`/`fe-test`; CI once Sprint 8 lands) → squash-merge → delete branch → sync local `main`. Sessions end clean on up-to-date `main`; a blocked merge is logged in `STATUS.md`.
 
 ## Security guardrails
 
@@ -107,7 +108,7 @@ Full model: [docs/GIT-BRANCHING.md](docs/GIT-BRANCHING.md). Summary:
 
 - **Start:** read `STATUS.md`, the sprint prompt in `prompts/`, and referenced ADRs.
 - **During:** implement only that sprint's stories; write tests alongside logic.
-- **End:** run `make test` + `make lint`, update `STATUS.md`, commit (Conventional Commits), open PR, print concise summary.
+- **End:** run `make test` + `make lint`, update `STATUS.md`, commit (Conventional Commits), open PR, agent-review the diff and fix findings, squash-merge once gates are green, sync local `main` (delete branch), print concise summary. End state: clean working tree on up-to-date `main`.
 
 ## Output style for Claude Code sessions
 

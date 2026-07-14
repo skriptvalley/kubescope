@@ -78,4 +78,6 @@ Dedicated events page backed by the watch→SSE bridge, live-updating and filter
 1. Run `make test` and `make lint`.
 2. Update `STATUS.md` (last work + type, next expected, checkboxes).
 3. Commit (Conventional Commits), push branch `sprint-4/<story-slug>`, open PR.
-4. Print a concise summary: outcome + blockers only.
+4. Agent code review on the PR diff; fix real findings on the branch (or log them as FB-N).
+5. When gates are green (`make test` + `make lint` + `make fe-test`; green CI once Sprint 8 lands): squash-merge with a Conventional subject, delete the branch, sync local `main` (`git checkout main && git pull --prune`).
+6. Print a concise summary: outcome + blockers only. The session ends with the work merged and the repo clean on up-to-date `main`.
