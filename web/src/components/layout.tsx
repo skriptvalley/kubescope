@@ -1,8 +1,12 @@
 import { NavLink, Outlet } from "react-router-dom";
 
+import { ContextSwitcher } from "@/components/context-switcher";
 import { cn } from "@/lib/utils";
 
-const navItems = [{ to: "/nodes", label: "Nodes" }];
+const navItems = [
+  { to: "/overview", label: "Overview" },
+  { to: "/nodes", label: "Nodes" },
+];
 
 export function Layout() {
   return (
@@ -26,6 +30,9 @@ export function Layout() {
               </NavLink>
             ))}
           </nav>
+          <div className="ml-auto">
+            <ContextSwitcher />
+          </div>
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-4 py-6">

@@ -38,8 +38,8 @@ web/node_modules: web/package.json web/package-lock.json
 
 ## --- Test / lint ---
 
-test: ## Go unit tests + envtest (downloads apiserver binaries on first run)
-	KUBEBUILDER_ASSETS="$$(go tool setup-envtest use -p path $(ENVTEST_K8S_VERSION))" go test ./...
+test: ## Go unit tests + envtest under the race detector (downloads apiserver binaries on first run)
+	KUBEBUILDER_ASSETS="$$(go tool setup-envtest use -p path $(ENVTEST_K8S_VERSION))" go test -race ./...
 
 fe-test: web/node_modules ## vitest + React Testing Library suite
 	cd web && npm run test:run

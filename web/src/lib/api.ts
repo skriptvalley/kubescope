@@ -11,10 +11,42 @@ interface NodeListResponse {
   items: NodeSummary[];
 }
 
+export interface ContextInfo {
+  name: string;
+  cluster: string;
+  namespace: string;
+  active: boolean;
+}
+
+export interface ContextHealth {
+  name: string;
+  reachable: boolean;
+  authOK: boolean;
+  serverVersion: string;
+  error?: string;
+  guidance?: string;
+}
+
+export interface Overview {
+  context: string;
+  serverVersion: string;
+  nodeCount: number;
+  namespaces: string[];
+}
+
+interface ContextListResponse {
+  items: ContextInfo[];
+}
+
+interface HealthListResponse {
+  items: ContextHealth[];
+}
+
 interface ErrorEnvelope {
   error?: {
     code?: string;
     message?: string;
+    guidance?: string;
   };
 }
 
@@ -22,12 +54,15 @@ interface ErrorEnvelope {
 export class ApiError extends Error {
   readonly code: string;
   readonly status: number;
+  /** Optional remediation text (e.g. ADR-0004 exec-plugin guidance). */
+  readonly guidance?: string;
 
-  constructor(message: string, code: string, status: number) {
+  constructor(message: string, code: string, status: number, guidance?: string) {
     super(message);
     this.name = "ApiError";
     this.code = code;
     this.status = status;
+    this.guidance = guidance;
   }
 }
 
@@ -45,14 +80,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 async function toApiError(response: Response): Promise<ApiError> {
   let code = "unknown_error";
   let message = `request failed with status ${response.status}`;
+  let guidance: string | undefined;
   try {
     const body = (await response.json()) as ErrorEnvelope;
     code = body.error?.code ?? code;
     message = body.error?.message ?? message;
+    guidance = body.error?.guidance;
   } catch {
     // Non-JSON error body; keep the generic message.
   }
-  return new ApiError(message, code, response.status);
+  return new ApiError(message, code, response.status, guidance);
 }
 
 export const api = {
@@ -60,4 +97,19 @@ export const api = {
     list: async (): Promise<NodeSummary[]> =>
       (await request<NodeListResponse>("/api/v1/nodes")).items,
   },
+  contexts: {
+    list: async (): Promise<ContextInfo[]> =>
+      (await request<ContextListResponse>("/api/v1/contexts")).items,
+    health: async (): Promise<ContextHealth[]> =>
+      (await request<HealthListResponse>("/api/v1/contexts/health")).items,
+    switch: async (name: string): Promise<ContextInfo[]> =>
+      (
+        await request<ContextListResponse>("/api/v1/contexts/switch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        })
+      ).items,
+  },
+  overview: async (): Promise<Overview> => request<Overview>("/api/v1/overview"),
 };

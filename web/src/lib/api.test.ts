@@ -49,6 +49,24 @@ describe("api.nodes.list", () => {
     expect(apiErr.message).toBe("cannot load kubeconfig");
   });
 
+  it("carries the guidance field from the error envelope", async () => {
+    stubFetch({
+      ok: false,
+      status: 502,
+      json: async () => ({
+        error: {
+          code: "cluster_unreachable",
+          message: "exec: aws not found",
+          guidance: "mount ~/.aws — see ADR-0004",
+        },
+      }),
+    });
+
+    const err = (await api.overview().catch((e: unknown) => e)) as ApiError;
+    expect(err.code).toBe("cluster_unreachable");
+    expect(err.guidance).toBe("mount ~/.aws — see ADR-0004");
+  });
+
   it("throws a generic ApiError when the error body is not JSON", async () => {
     stubFetch({
       ok: false,
@@ -65,5 +83,59 @@ describe("api.nodes.list", () => {
     expect(apiErr.code).toBe("unknown_error");
     expect(apiErr.status).toBe(502);
     expect(apiErr.message).toContain("502");
+  });
+});
+
+describe("api.contexts", () => {
+  it("lists contexts from the envelope", async () => {
+    stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        items: [{ name: "prod", cluster: "c", namespace: "default", active: true }],
+      }),
+    });
+
+    const contexts = await api.contexts.list();
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0].active).toBe(true);
+  });
+
+  it("posts the target name when switching and returns the new list", async () => {
+    const fetchStub = stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({ items: [{ name: "dev", cluster: "c", namespace: "default", active: true }] }),
+    });
+
+    const contexts = await api.contexts.switch("dev");
+
+    expect(contexts[0].name).toBe("dev");
+    expect(fetchStub).toHaveBeenCalledWith(
+      "/api/v1/contexts/switch",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "dev" }),
+      }),
+    );
+  });
+});
+
+describe("api.overview", () => {
+  it("returns the overview object", async () => {
+    stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        context: "prod",
+        serverVersion: "v1.33.0",
+        nodeCount: 2,
+        namespaces: ["default"],
+      }),
+    });
+
+    const overview = await api.overview();
+    expect(overview.serverVersion).toBe("v1.33.0");
+    expect(overview.nodeCount).toBe(2);
   });
 });
