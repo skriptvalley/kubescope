@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -39,6 +41,15 @@ func (f *fakeProvider) ProbeAll(context.Context) ([]kube.ContextHealth, error) {
 }
 
 func (f *fakeProvider) ExecGuidance(string) string { return "" }
+
+func (f *fakeProvider) Dynamic() (dynamic.Interface, error) { return nil, f.err }
+
+func (f *fakeProvider) Discovery() (discovery.DiscoveryInterface, error) {
+	if f.clientset == nil {
+		return nil, f.err
+	}
+	return f.clientset.Discovery(), f.err
+}
 
 func testServer(t *testing.T, dist fstest.MapFS) http.Handler {
 	t.Helper()

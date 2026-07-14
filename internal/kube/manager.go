@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -40,6 +42,9 @@ type Manager struct {
 type cachedClient struct {
 	restConfig *rest.Config
 	clientset  kubernetes.Interface
+	// dynamicClient serves the generic resource engine (ADR-0003): get/list
+	// for any GVR, including CRDs, via unstructured objects.
+	dynamicClient dynamic.Interface
 }
 
 // NewManager returns a Manager reading the kubeconfig at path. The file is not
@@ -142,17 +147,58 @@ func (m *Manager) Clientset() (kubernetes.Interface, error) {
 // ClientsetFor returns a typed clientset for the named context, building and
 // caching it on first use. The cache is concurrency-safe.
 func (m *Manager) ClientsetFor(name string) (kubernetes.Interface, error) {
+	cached, err := m.clientsFor(name)
+	if err != nil {
+		return nil, err
+	}
+	return cached.clientset, nil
+}
+
+// Dynamic returns a dynamic client for the active context — the generic
+// resource engine's path to any GVR, incl. CRDs (ADR-0003).
+func (m *Manager) Dynamic() (dynamic.Interface, error) {
+	name, err := m.ActiveContextName()
+	if err != nil {
+		return nil, err
+	}
+	return m.DynamicFor(name)
+}
+
+// DynamicFor returns a dynamic client for the named context, building and
+// caching it alongside the typed clientset on first use.
+func (m *Manager) DynamicFor(name string) (dynamic.Interface, error) {
+	cached, err := m.clientsFor(name)
+	if err != nil {
+		return nil, err
+	}
+	return cached.dynamicClient, nil
+}
+
+// Discovery returns a discovery client for the active context, used to
+// enumerate every API group/version/resource the cluster serves (Sprint 2).
+func (m *Manager) Discovery() (discovery.DiscoveryInterface, error) {
+	cs, err := m.Clientset()
+	if err != nil {
+		return nil, err
+	}
+	return cs.Discovery(), nil
+}
+
+// clientsFor builds (once) and caches the typed and dynamic clients for a
+// context. Both share the same rest.Config; only a fully successful build is
+// cached, so a kubeconfig fixed after startup is picked up on the next request.
+func (m *Manager) clientsFor(name string) (*cachedClient, error) {
 	m.mu.RLock()
 	cached, ok := m.clients[name]
 	m.mu.RUnlock()
 	if ok {
-		return cached.clientset, nil
+		return cached, nil
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if cached, ok := m.clients[name]; ok { // another goroutine may have built it
-		return cached.clientset, nil
+		return cached, nil
 	}
 	restCfg, err := m.buildRestConfig(name)
 	if err != nil {
@@ -162,8 +208,13 @@ func (m *Manager) ClientsetFor(name string) (kubernetes.Interface, error) {
 	if err != nil {
 		return nil, fmt.Errorf("building clientset for context %q: %w", name, err)
 	}
-	m.clients[name] = &cachedClient{restConfig: restCfg, clientset: cs}
-	return cs, nil
+	dyn, err := dynamic.NewForConfig(restCfg)
+	if err != nil {
+		return nil, fmt.Errorf("building dynamic client for context %q: %w", name, err)
+	}
+	cached = &cachedClient{restConfig: restCfg, clientset: cs, dynamicClient: dyn}
+	m.clients[name] = cached
+	return cached, nil
 }
 
 // ProbeAll probes every context concurrently for reachability, auth and server

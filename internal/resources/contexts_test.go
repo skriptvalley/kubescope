@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/skriptvalley/kubescope/internal/kube"
@@ -29,6 +31,10 @@ type fakeCluster struct {
 	health       []kube.ContextHealth
 	healthErr    error
 	execGuidance string
+	dynamic      dynamic.Interface
+	dynamicErr   error
+	discovery    discovery.DiscoveryInterface
+	discoveryErr error
 }
 
 func (f *fakeCluster) Clientset() (kubernetes.Interface, error) { return f.clientset, f.clientsetErr }
@@ -36,6 +42,10 @@ func (f *fakeCluster) ActiveContextName() (string, error)       { return f.activ
 func (f *fakeCluster) Contexts() ([]kube.ContextInfo, error)    { return f.contexts, f.contextsErr }
 func (f *fakeCluster) SwitchContext(name string) error          { f.switched = name; return f.switchErr }
 func (f *fakeCluster) ExecGuidance(string) string               { return f.execGuidance }
+func (f *fakeCluster) Dynamic() (dynamic.Interface, error)      { return f.dynamic, f.dynamicErr }
+func (f *fakeCluster) Discovery() (discovery.DiscoveryInterface, error) {
+	return f.discovery, f.discoveryErr
+}
 func (f *fakeCluster) ProbeAll(context.Context) ([]kube.ContextHealth, error) {
 	return f.health, f.healthErr
 }
