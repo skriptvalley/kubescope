@@ -139,3 +139,77 @@ describe("api.overview", () => {
     expect(overview.nodeCount).toBe(2);
   });
 });
+
+describe("api.namespaces.list", () => {
+  it("returns names from the envelope", async () => {
+    stubFetch({ ok: true, status: 200, json: async () => ({ items: ["default", "kube-system"] }) });
+    expect(await api.namespaces.list()).toEqual(["default", "kube-system"]);
+  });
+});
+
+describe("api.resources", () => {
+  it("requests discovery, with refresh when asked", async () => {
+    const fetchStub = stubFetch({ ok: true, status: 200, json: async () => ({ groups: [] }) });
+    await api.resources.discovery();
+    expect(fetchStub).toHaveBeenCalledWith("/api/v1/discovery", expect.anything());
+
+    await api.resources.discovery(true);
+    expect(fetchStub).toHaveBeenCalledWith("/api/v1/discovery?refresh=true", expect.anything());
+  });
+
+  it("lists a namespaced resource with the namespace query", async () => {
+    const fetchStub = stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({ columns: [], rows: [], namespaced: true }),
+    });
+    await api.resources.list({ group: "apps", version: "v1", resource: "deployments", namespace: "default" });
+    expect(fetchStub).toHaveBeenCalledWith(
+      "/api/v1/resources/apps/v1/deployments?namespace=default",
+      expect.anything(),
+    );
+  });
+
+  it("lists across all namespaces when no namespace is given", async () => {
+    const fetchStub = stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({ columns: [], rows: [], namespaced: true }),
+    });
+    await api.resources.list({ group: "core", version: "v1", resource: "pods" });
+    expect(fetchStub).toHaveBeenCalledWith("/api/v1/resources/core/v1/pods", expect.anything());
+  });
+
+  it("unwraps a single object from the envelope", async () => {
+    stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({ object: { kind: "Pod", metadata: { name: "nginx" } } }),
+    });
+    const obj = await api.resources.get({
+      group: "core",
+      version: "v1",
+      resource: "pods",
+      namespace: "default",
+      name: "nginx",
+    });
+    expect(obj.kind).toBe("Pod");
+    expect(obj.metadata?.name).toBe("nginx");
+  });
+
+  it("unwraps the yaml string from the envelope", async () => {
+    const fetchStub = stubFetch({ ok: true, status: 200, json: async () => ({ yaml: "kind: Pod\n" }) });
+    const yaml = await api.resources.yaml({
+      group: "core",
+      version: "v1",
+      resource: "pods",
+      namespace: "default",
+      name: "nginx",
+    });
+    expect(yaml).toBe("kind: Pod\n");
+    expect(fetchStub).toHaveBeenCalledWith(
+      "/api/v1/resources/core/v1/pods/nginx/yaml?namespace=default",
+      expect.anything(),
+    );
+  });
+});
