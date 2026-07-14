@@ -19,8 +19,9 @@ import (
 // globals.
 type Options struct {
 	Logger *slog.Logger
-	// Kube provides clientsets for API handlers.
-	Kube resources.ClientsetProvider
+	// Kube enumerates/switches contexts and provides clientsets for API
+	// handlers (a superset of resources.ClientsetProvider).
+	Kube resources.Cluster
 	// Dist is the built SPA (index.html at its root).
 	Dist fs.FS
 }
@@ -42,6 +43,10 @@ func New(opts Options) http.Handler {
 		})
 		api.Route("/v1", func(v1 chi.Router) {
 			v1.Get("/nodes", resources.NodesHandler(opts.Kube, opts.Logger))
+			v1.Get("/contexts", resources.ContextsHandler(opts.Kube, opts.Logger))
+			v1.Post("/contexts/switch", resources.SwitchContextHandler(opts.Kube, opts.Logger))
+			v1.Get("/contexts/health", resources.HealthHandler(opts.Kube, opts.Logger))
+			v1.Get("/overview", resources.OverviewHandler(opts.Kube, opts.Logger))
 		})
 	})
 

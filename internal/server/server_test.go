@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -13,14 +14,29 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/skriptvalley/kubescope/internal/kube"
 )
 
+// fakeProvider satisfies resources.Cluster for router-level tests.
 type fakeProvider struct {
 	clientset kubernetes.Interface
 	err       error
 }
 
 func (f *fakeProvider) Clientset() (kubernetes.Interface, error) { return f.clientset, f.err }
+
+func (f *fakeProvider) ActiveContextName() (string, error) { return "test", f.err }
+
+func (f *fakeProvider) Contexts() ([]kube.ContextInfo, error) {
+	return []kube.ContextInfo{{Name: "test", Cluster: "test", Namespace: "default", Active: true}}, f.err
+}
+
+func (f *fakeProvider) SwitchContext(string) error { return f.err }
+
+func (f *fakeProvider) ProbeAll(context.Context) ([]kube.ContextHealth, error) {
+	return []kube.ContextHealth{{Name: "test", Reachable: true, AuthOK: true, ServerVersion: "v1.33.0"}}, f.err
+}
 
 func testServer(t *testing.T, dist fstest.MapFS) http.Handler {
 	t.Helper()
