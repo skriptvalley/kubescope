@@ -10,9 +10,9 @@
 
 ## Current state
 - Last updated: 2026-07-14
-- Last work: Sprint 0 — Walking skeleton & deployment spine [sprint]
-- Summary: Walking skeleton proven end-to-end: single binary (embedded SPA) in a distroless multi-arch image lists kind-cluster nodes in the browser via mounted kubeconfig. Go+FE tests (incl. envtest) and lint green; smoke scripted in `make smoke`.
-- Next expected: Sprint 1 — Kubeconfig & context management + cluster overview
+- Last work: Sprint 1 — Kubeconfig & context management + cluster overview [sprint]
+- Summary: Multi-context support end-to-end: `internal/kube` enumerates contexts, switches the active one (in-memory, kubeconfig read-only), and caches a race-safe rest.Config/clientset per context. New APIs `/api/v1/contexts`, `/contexts/switch`, `/contexts/health` (concurrent probes, exec-plugin → ADR-0004 guidance), `/overview`. UI header context switcher with health badges + cluster overview page; switch invalidates all TanStack Query caches. Manual smoke on two kind clusters confirmed overview/nodes change per cluster. `make test` (race+envtest), lint, and fe-test green.
+- Next expected: Sprint 2 — Generic resource engine (read-only)
 - ADRs touched this session: none
 
 ## Sprint board
@@ -38,19 +38,19 @@
   - [x] Multi-arch build (amd64 + arm64)
   - [x] Makefile targets + kind config in `deploy/`
 
-### Sprint 1 — Kubeconfig & context management + cluster overview — [todo]
+### Sprint 1 — Kubeconfig & context management + cluster overview — [done]
 - Story 1.1 — Kubeconfig parsing & context enumeration API
-  - [ ] Parse mounted kubeconfig; enumerate contexts
-  - [ ] Contexts API endpoint
+  - [x] Parse mounted kubeconfig; enumerate contexts
+  - [x] Contexts API endpoint
 - Story 1.2 — Context switching + per-context rest.Config/client cache
-  - [ ] Context switch API + UI switcher
-  - [ ] Per-context rest.Config/client cache
+  - [x] Context switch API + UI switcher
+  - [x] Per-context rest.Config/client cache
 - Story 1.3 — Per-context connection/health status
-  - [ ] Reachability + auth check per context
-  - [ ] Server version probe; status surfaced in UI
+  - [x] Reachability + auth check per context
+  - [x] Server version probe; status surfaced in UI
 - Story 1.4 — Cluster overview page
-  - [ ] Overview API (server version, node count, namespace list)
-  - [ ] Overview page UI
+  - [x] Overview API (server version, node count, namespace list)
+  - [x] Overview page UI
 
 ### Sprint 2 — Generic resource engine (read-only) — [todo]
 - Story 2.1 — Discovery: enumerate all API groups/resources incl. CRDs (cached, refreshable)
