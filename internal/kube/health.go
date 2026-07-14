@@ -35,6 +35,22 @@ func isAuthString(msg string) bool {
 		strings.Contains(l, " 403")
 }
 
+// ExecGuidance returns the ADR-0004 exec-plugin guidance for the named context
+// if it authenticates via an exec credential plugin, or "" otherwise. Handlers
+// use it to attach guidance to errors from exec-auth contexts (e.g. overview),
+// matching what the health probe already surfaces. A missing/malformed
+// kubeconfig yields "" — the caller already reports that failure.
+func (m *Manager) ExecGuidance(name string) string {
+	raw, err := m.rawConfig()
+	if err != nil {
+		return ""
+	}
+	if !contextUsesExec(raw, name) {
+		return ""
+	}
+	return execGuidance(execCommand(raw, name))
+}
+
 // contextUsesExec reports whether the named context authenticates via an exec
 // credential plugin (EKS/GKE style).
 func contextUsesExec(raw clientcmdapi.Config, name string) bool {

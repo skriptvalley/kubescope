@@ -41,6 +41,11 @@ func New(opts Options) http.Handler {
 		api.NotFound(func(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "not_found", "no such API route")
 		})
+		// Wrong-method /api requests get the same JSON envelope, not chi's
+		// bare empty-body 405.
+		api.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+			writeJSONError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed for this API route")
+		})
 		api.Route("/v1", func(v1 chi.Router) {
 			v1.Get("/nodes", resources.NodesHandler(opts.Kube, opts.Logger))
 			v1.Get("/contexts", resources.ContextsHandler(opts.Kube, opts.Logger))

@@ -22,7 +22,14 @@ type Cluster interface {
 	Contexts() ([]kube.ContextInfo, error)
 	SwitchContext(name string) error
 	ProbeAll(ctx context.Context) ([]kube.ContextHealth, error)
+	// ExecGuidance returns ADR-0004 exec-plugin guidance for a context that
+	// uses an exec credential plugin, or "" otherwise.
+	ExecGuidance(name string) string
 }
+
+// maxSwitchBodyBytes caps the context-switch request body; the payload is a
+// single small {"name":"..."} object.
+const maxSwitchBodyBytes = 64 << 10
 
 type contextList struct {
 	Items []kube.ContextInfo `json:"items"`
@@ -58,9 +65,16 @@ func ContextsHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 func SwitchContextHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req switchRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSwitchBodyBytes))
+		if err := dec.Decode(&req); err != nil {
 			writeError(w, logger, http.StatusBadRequest, "invalid_request",
 				`request body must be JSON with a "name" field`)
+			return
+		}
+		// Reject trailing data after the first JSON value (e.g. two objects).
+		if dec.More() {
+			writeError(w, logger, http.StatusBadRequest, "invalid_request",
+				"request body must contain a single JSON object")
 			return
 		}
 		if req.Name == "" {

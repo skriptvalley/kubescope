@@ -40,17 +40,17 @@ func OverviewHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 		ctx := r.Context()
 		version, err := clientset.Discovery().ServerVersion()
 		if err != nil {
-			writeUnreachable(w, logger, "fetching server version", err)
+			writeUnreachable(w, logger, "fetching server version", err, cluster.ExecGuidance(active))
 			return
 		}
 		nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 		if err != nil {
-			writeUnreachable(w, logger, "listing nodes", err)
+			writeUnreachable(w, logger, "listing nodes", err, cluster.ExecGuidance(active))
 			return
 		}
 		nsList, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 		if err != nil {
-			writeUnreachable(w, logger, "listing namespaces", err)
+			writeUnreachable(w, logger, "listing namespaces", err, cluster.ExecGuidance(active))
 			return
 		}
 
@@ -69,8 +69,8 @@ func OverviewHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 	}
 }
 
-func writeUnreachable(w http.ResponseWriter, logger *slog.Logger, action string, err error) {
+func writeUnreachable(w http.ResponseWriter, logger *slog.Logger, action string, err error, guidance string) {
 	logger.Error(action, "error", err)
-	writeError(w, logger, http.StatusBadGateway, "cluster_unreachable",
-		fmt.Sprintf("%s: %v", action, err))
+	writeErrorGuidance(w, logger, http.StatusBadGateway, "cluster_unreachable",
+		fmt.Sprintf("%s: %v", action, err), guidance)
 }

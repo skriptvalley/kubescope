@@ -93,13 +93,20 @@ function OverviewSkeleton() {
 }
 
 function OverviewError({ error }: { error: Error }) {
-  const detail =
-    error instanceof ApiError ? `${error.message} (${error.code})` : error.message;
+  const apiError = error instanceof ApiError ? error : undefined;
+  const title =
+    apiError?.code === "kubeconfig_unavailable"
+      ? "Kubeconfig unavailable"
+      : "Cluster unreachable";
+  const detail = apiError ? `${apiError.message} (${apiError.code})` : error.message;
   return (
     <Alert variant="destructive">
       <AlertCircle className="h-4 w-4" />
-      <AlertTitle>Cluster unreachable</AlertTitle>
-      <AlertDescription>{detail}</AlertDescription>
+      <AlertTitle>{title}</AlertTitle>
+      <AlertDescription className="space-y-2">
+        <p>{detail}</p>
+        {apiError?.guidance && <p className="font-medium">{apiError.guidance}</p>}
+      </AlertDescription>
     </Alert>
   );
 }

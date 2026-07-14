@@ -61,4 +61,28 @@ describe("OverviewPage", () => {
       screen.getByText(/connection refused \(cluster_unreachable\)/i),
     ).toBeInTheDocument();
   });
+
+  it("labels a kubeconfig error distinctly from an unreachable cluster", async () => {
+    overviewMock.mockRejectedValue(
+      new ApiError("no active context: current-context unset", "kubeconfig_unavailable", 503),
+    );
+    renderPage();
+
+    expect(await screen.findByText(/kubeconfig unavailable/i)).toBeInTheDocument();
+    expect(screen.queryByText(/cluster unreachable/i)).not.toBeInTheDocument();
+  });
+
+  it("shows ADR-0004 guidance when the error carries it", async () => {
+    overviewMock.mockRejectedValue(
+      new ApiError(
+        "fetching server version: exec: aws not found",
+        "cluster_unreachable",
+        502,
+        "mount ~/.aws or pre-generate a token — see ADR-0004",
+      ),
+    );
+    renderPage();
+
+    expect(await screen.findByText(/ADR-0004/i)).toBeInTheDocument();
+  });
 });

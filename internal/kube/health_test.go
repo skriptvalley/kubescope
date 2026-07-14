@@ -3,8 +3,11 @@ package kube
 import (
 	"context"
 	"errors"
+	"net"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -140,4 +143,95 @@ func TestProbeAllMalformedConfig(t *testing.T) {
 	m := NewManager(filepath.Join(t.TempDir(), "absent"))
 	_, err := m.ProbeAll(context.Background())
 	require.Error(t, err)
+}
+
+func TestExecGuidanceMethod(t *testing.T) {
+	ca := testCACert(t)
+	cfg := clientcmdapi.Config{
+		Clusters: map[string]*clientcmdapi.Cluster{"c": {Server: "https://c:6443", CertificateAuthorityData: ca}},
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{
+			"exec":  {Exec: &clientcmdapi.ExecConfig{Command: "aws", APIVersion: "client.authentication.k8s.io/v1beta1"}},
+			"token": tokenAuth(),
+		},
+		Contexts: map[string]*clientcmdapi.Context{
+			"exec-ctx":  {Cluster: "c", AuthInfo: "exec"},
+			"token-ctx": {Cluster: "c", AuthInfo: "token"},
+		},
+		CurrentContext: "token-ctx",
+	}
+	m := NewManager(writeConfig(t, cfg))
+	assert.Contains(t, m.ExecGuidance("exec-ctx"), "ADR-0004")
+	assert.Empty(t, m.ExecGuidance("token-ctx"), "non-exec context yields no guidance")
+	assert.Empty(t, m.ExecGuidance("missing"))
+}
+
+// blackHoleServer accepts TCP connections but never responds, so a client's TLS
+// handshake stalls until the probe timeout fires. Returns its https:// URL.
+func blackHoleServer(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, conn)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		mu.Lock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		mu.Unlock()
+	})
+	return "https://" + ln.Addr().String()
+}
+
+// TestProbeAllConcurrentAndTimesOut proves two acceptance criteria at once:
+// probes run concurrently (one unreachable context never blocks the other) and
+// each is bounded by the per-probe timeout. Two black-hole servers each stall
+// until the 500ms timeout; run concurrently they finish in ~500ms, run serially
+// they would take ~1s.
+func TestProbeAllConcurrentAndTimesOut(t *testing.T) {
+	ca := testCACert(t)
+	cfg := clientcmdapi.Config{
+		Clusters: map[string]*clientcmdapi.Cluster{
+			"a": {Server: blackHoleServer(t), CertificateAuthorityData: ca},
+			"b": {Server: blackHoleServer(t), CertificateAuthorityData: ca},
+		},
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{"u": tokenAuth()},
+		Contexts: map[string]*clientcmdapi.Context{
+			"ctx-a": {Cluster: "a", AuthInfo: "u"},
+			"ctx-b": {Cluster: "b", AuthInfo: "u"},
+		},
+		CurrentContext: "ctx-a",
+	}
+	m := NewManager(writeConfig(t, cfg))
+	m.probeTimeout = 500 * time.Millisecond
+
+	// Safety net: if the per-probe timeout were removed, the black-hole would
+	// hang forever; this deadline makes ProbeAll return so the < 900ms
+	// assertion fails cleanly instead of the test hanging.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	health, err := m.ProbeAll(ctx)
+	elapsed := time.Since(start)
+
+	require.NoError(t, err)
+	require.Len(t, health, 2)
+	assert.Less(t, elapsed, 900*time.Millisecond, "probes must run concurrently and honor the per-probe timeout")
+	for _, h := range health {
+		assert.False(t, h.Reachable, "a black-hole server is unreachable")
+		assert.NotEmpty(t, h.Error, "the timeout failure reason is surfaced")
+	}
 }

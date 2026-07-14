@@ -20,9 +20,9 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-// probeTimeout bounds a single per-context health probe so one unreachable
-// cluster can never stall the others or the request.
-const probeTimeout = 5 * time.Second
+// defaultProbeTimeout bounds a single per-context health probe so one
+// unreachable cluster can never stall the others or the request.
+const defaultProbeTimeout = 5 * time.Second
 
 // Manager parses the kubeconfig on demand, tracks the active context in memory,
 // and caches a successfully-built rest.Config + clientset per context. Failures
@@ -30,6 +30,7 @@ const probeTimeout = 5 * time.Second
 // picked up on the next request without a restart.
 type Manager struct {
 	kubeconfigPath string
+	probeTimeout   time.Duration
 
 	mu      sync.RWMutex
 	active  string                   // in-memory override; "" = kubeconfig current-context
@@ -44,7 +45,11 @@ type cachedClient struct {
 // NewManager returns a Manager reading the kubeconfig at path. The file is not
 // touched until the first context or client is requested.
 func NewManager(path string) *Manager {
-	return &Manager{kubeconfigPath: path, clients: make(map[string]*cachedClient)}
+	return &Manager{
+		kubeconfigPath: path,
+		probeTimeout:   defaultProbeTimeout,
+		clients:        make(map[string]*cachedClient),
+	}
 }
 
 // ContextInfo describes one kubeconfig context for the API.
@@ -200,7 +205,7 @@ func (m *Manager) probe(ctx context.Context, raw clientcmdapi.Config, name strin
 		h.Name = name
 		return h
 	}
-	restCfg.Timeout = probeTimeout
+	restCfg.Timeout = m.probeTimeout
 
 	cs, err := kubernetes.NewForConfig(restCfg)
 	if err != nil {

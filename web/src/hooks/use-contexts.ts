@@ -20,14 +20,25 @@ export function useContextsHealth() {
   });
 }
 
-/** Switch the active context, then invalidate every query so all views refetch
- *  against the new cluster. */
+/** Query keys that hold data scoped to a specific cluster; dropped on switch so
+ *  a previously-visited view can never render the prior cluster's cached data. */
+const clusterDataKeys = [["overview"], ["nodes"]];
+
+/** Switch the active context, then drop every cluster-scoped cache and refetch
+ *  so all views (mounted or not) show the new cluster, never stale data. */
 export function useSwitchContext() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: api.contexts.switch,
     onSuccess: (items: ContextInfo[]) => {
+      // Seed the fresh context list so the switcher doesn't flash to loading.
       queryClient.setQueryData(["contexts"], items);
+      // Remove data tied to the old cluster (incl. unmounted views) so a later
+      // navigation shows a loading state + fresh fetch, not the prior cluster.
+      for (const key of clusterDataKeys) {
+        queryClient.removeQueries({ queryKey: key });
+      }
+      // Refetch everything still active (health, and any mounted cluster view).
       void queryClient.invalidateQueries();
     },
   });

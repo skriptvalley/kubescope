@@ -28,12 +28,14 @@ type fakeCluster struct {
 	switched     string
 	health       []kube.ContextHealth
 	healthErr    error
+	execGuidance string
 }
 
 func (f *fakeCluster) Clientset() (kubernetes.Interface, error) { return f.clientset, f.clientsetErr }
 func (f *fakeCluster) ActiveContextName() (string, error)       { return f.active, f.activeErr }
 func (f *fakeCluster) Contexts() ([]kube.ContextInfo, error)    { return f.contexts, f.contextsErr }
 func (f *fakeCluster) SwitchContext(name string) error          { f.switched = name; return f.switchErr }
+func (f *fakeCluster) ExecGuidance(string) string               { return f.execGuidance }
 func (f *fakeCluster) ProbeAll(context.Context) ([]kube.ContextHealth, error) {
 	return f.health, f.healthErr
 }
@@ -120,6 +122,30 @@ func TestSwitchContextHandler(t *testing.T) {
 
 		assert.Equal(t, http.StatusNotFound, rec.Code)
 		assert.Equal(t, "unknown_context", errorCode(t, rec.Body.Bytes()))
+	})
+
+	t.Run("trailing data after the object is rejected", func(t *testing.T) {
+		cluster := &fakeCluster{contexts: []kube.ContextInfo{{Name: "a", Active: true}}}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/contexts/switch",
+			strings.NewReader(`{"name":"a"}{"name":"b"}`))
+		SwitchContextHandler(cluster, discardLogger())(rec, req)
+
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Equal(t, "invalid_request", errorCode(t, rec.Body.Bytes()))
+		assert.Empty(t, cluster.switched, "no switch performed on a malformed body")
+	})
+
+	t.Run("oversized body is rejected", func(t *testing.T) {
+		cluster := &fakeCluster{}
+		huge := `{"name":"` + strings.Repeat("A", (64<<10)+1) + `"}`
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/contexts/switch", strings.NewReader(huge))
+		SwitchContextHandler(cluster, discardLogger())(rec, req)
+
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Equal(t, "invalid_request", errorCode(t, rec.Body.Bytes()))
+		assert.Empty(t, cluster.switched)
 	})
 }
 

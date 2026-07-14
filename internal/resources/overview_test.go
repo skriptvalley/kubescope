@@ -83,4 +83,25 @@ func TestOverviewHandler(t *testing.T) {
 		assert.Equal(t, http.StatusBadGateway, rec.Code)
 		assert.Equal(t, "cluster_unreachable", errorCode(t, rec.Body.Bytes()))
 	})
+
+	t.Run("exec-plugin failure carries ADR-0004 guidance", func(t *testing.T) {
+		cs := clusterWithVersion(t, "v1.33.0")
+		cs.(*fake.Clientset).PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, errors.New(`exec: "aws": executable file not found in $PATH`)
+		})
+		cluster := &fakeCluster{active: "eks", clientset: cs, execGuidance: "mount ~/.aws — see ADR-0004"}
+		rec := httptest.NewRecorder()
+		OverviewHandler(cluster, discardLogger())(rec, httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil))
+
+		require.Equal(t, http.StatusBadGateway, rec.Code)
+		var env struct {
+			Error struct {
+				Code     string `json:"code"`
+				Guidance string `json:"guidance"`
+			} `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+		assert.Equal(t, "cluster_unreachable", env.Error.Code)
+		assert.Contains(t, env.Error.Guidance, "ADR-0004", "overview surfaces exec guidance like the health probe does")
+	})
 }

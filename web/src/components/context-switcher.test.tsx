@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ContextInfo } from "@/lib/api";
+import { ApiError, type ContextInfo } from "@/lib/api";
 import { healthBadge } from "@/lib/context-health";
 
 import { ContextSwitcher } from "./context-switcher";
@@ -85,12 +85,13 @@ describe("ContextSwitcher", () => {
     await waitFor(() => expect(trigger).toBeEnabled());
     fireEvent.click(trigger);
 
-    expect(await screen.findByRole("listbox")).toBeInTheDocument();
+    // 'dev' only appears in the open menu (the trigger shows the active 'prod').
+    expect(await screen.findByText("dev")).toBeInTheDocument();
     expect(screen.getByText("Healthy")).toBeInTheDocument();
     expect(screen.getByText("Unreachable")).toBeInTheDocument();
   });
 
-  it("switches context and invalidates all queries so views refetch", async () => {
+  it("switches context, drops cluster caches, and globally invalidates so views refetch", async () => {
     listMock.mockResolvedValue(contexts);
     healthMock.mockResolvedValue([]);
     switchMock.mockResolvedValue([
@@ -99,6 +100,7 @@ describe("ContextSwitcher", () => {
     ]);
     const { queryClient } = renderSwitcher();
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const removeSpy = vi.spyOn(queryClient, "removeQueries");
 
     const trigger = await screen.findByRole("button", { name: /switch context/i });
     await waitFor(() => expect(trigger).toBeEnabled());
@@ -107,6 +109,26 @@ describe("ContextSwitcher", () => {
 
     // TanStack Query v5 passes a second context arg to the mutation fn.
     await waitFor(() => expect(switchMock).toHaveBeenCalledWith("dev", expect.anything()));
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalled());
+    // Stale cluster-scoped data is dropped so a later navigation can't show it.
+    await waitFor(() => expect(removeSpy).toHaveBeenCalledWith({ queryKey: ["overview"] }));
+    expect(removeSpy).toHaveBeenCalledWith({ queryKey: ["nodes"] });
+    // Global invalidation (no filter args) refetches every active view.
+    expect(invalidateSpy).toHaveBeenCalledWith();
+  });
+
+  it("surfaces a failed switch instead of silently reverting", async () => {
+    listMock.mockResolvedValue(contexts);
+    healthMock.mockResolvedValue([]);
+    switchMock.mockRejectedValue(new ApiError('unknown context "dev"', "unknown_context", 404));
+    renderSwitcher();
+
+    const trigger = await screen.findByRole("button", { name: /switch context/i });
+    await waitFor(() => expect(trigger).toBeEnabled());
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByText("dev"));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/switch failed/i);
+    expect(alert).toHaveTextContent(/unknown_context/);
   });
 });

@@ -38,6 +38,8 @@ func (f *fakeProvider) ProbeAll(context.Context) ([]kube.ContextHealth, error) {
 	return []kube.ContextHealth{{Name: "test", Reachable: true, AuthOK: true, ServerVersion: "v1.33.0"}}, f.err
 }
 
+func (f *fakeProvider) ExecGuidance(string) string { return "" }
+
 func testServer(t *testing.T, dist fstest.MapFS) http.Handler {
 	t.Helper()
 	return New(Options{
@@ -57,6 +59,7 @@ func spaFixture() fstest.MapFS {
 func TestRouting(t *testing.T) {
 	tests := []struct {
 		name           string
+		method         string
 		path           string
 		wantStatus     int
 		wantBody       string
@@ -110,13 +113,31 @@ func TestRouting(t *testing.T) {
 			wantStatus: http.StatusOK,
 			wantBody:   `{"items":[]}`,
 		},
+		{
+			name:           "wrong method on api route is json 405, not empty body",
+			method:         http.MethodPost,
+			path:           "/api/v1/nodes",
+			wantStatus:     http.StatusMethodNotAllowed,
+			wantJSONErrTag: "method_not_allowed",
+		},
+		{
+			name:           "get on post-only switch route is json 405",
+			method:         http.MethodGet,
+			path:           "/api/v1/contexts/switch",
+			wantStatus:     http.StatusMethodNotAllowed,
+			wantJSONErrTag: "method_not_allowed",
+		},
 	}
 
 	srv := testServer(t, spaFixture())
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			method := tt.method
+			if method == "" {
+				method = http.MethodGet
+			}
 			rec := httptest.NewRecorder()
-			srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			srv.ServeHTTP(rec, httptest.NewRequest(method, tt.path, nil))
 
 			assert.Equal(t, tt.wantStatus, rec.Code)
 			if tt.wantBody != "" {

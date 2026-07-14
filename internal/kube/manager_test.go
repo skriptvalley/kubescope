@@ -111,6 +111,35 @@ func TestSwitchContext(t *testing.T) {
 	assert.Equal(t, "two", active)
 }
 
+func TestSwitchContextNeverWritesKubeconfig(t *testing.T) {
+	ca := testCACert(t)
+	cfg := clientcmdapi.Config{
+		Clusters:  map[string]*clientcmdapi.Cluster{"c": {Server: "https://c:6443", CertificateAuthorityData: ca}},
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{"u": tokenAuth()},
+		Contexts: map[string]*clientcmdapi.Context{
+			"one": {Cluster: "c", AuthInfo: "u"},
+			"two": {Cluster: "c", AuthInfo: "u"},
+		},
+		CurrentContext: "one",
+	}
+	path := writeConfig(t, cfg)
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	m := NewManager(path)
+	require.NoError(t, m.SwitchContext("two"))
+
+	// The #1 Sprint 1 invariant: the mounted kubeconfig is strictly read-only;
+	// the switch lives only in memory.
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "the mounted kubeconfig must never be written")
+
+	reloaded, err := clientcmd.LoadFromFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "one", reloaded.CurrentContext, "current-context on disk stays unchanged after a switch")
+}
+
 func TestClientsetForCachesAndResolvesFilePathCA(t *testing.T) {
 	caPath := filepath.Join(t.TempDir(), "ca.crt")
 	require.NoError(t, os.WriteFile(caPath, testCACert(t), 0o600))

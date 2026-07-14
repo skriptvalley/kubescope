@@ -49,6 +49,24 @@ describe("api.nodes.list", () => {
     expect(apiErr.message).toBe("cannot load kubeconfig");
   });
 
+  it("carries the guidance field from the error envelope", async () => {
+    stubFetch({
+      ok: false,
+      status: 502,
+      json: async () => ({
+        error: {
+          code: "cluster_unreachable",
+          message: "exec: aws not found",
+          guidance: "mount ~/.aws — see ADR-0004",
+        },
+      }),
+    });
+
+    const err = (await api.overview().catch((e: unknown) => e)) as ApiError;
+    expect(err.code).toBe("cluster_unreachable");
+    expect(err.guidance).toBe("mount ~/.aws — see ADR-0004");
+  });
+
   it("throws a generic ApiError when the error body is not JSON", async () => {
     stubFetch({
       ok: false,
