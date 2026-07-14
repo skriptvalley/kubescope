@@ -26,7 +26,7 @@ make dev    # run backend + frontend in dev mode
 make test   # run test suites
 ```
 
-Make targets are stubs until Sprint 0 lands (Story 0.5). Full contributor guide: [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+Run `make help` for all targets (build, lint, docker-build, kind-up, smoke, …). Full contributor guide: [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ## Documentation
 
