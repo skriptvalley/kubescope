@@ -1,0 +1,6 @@
+# kind cluster for Kubescope smoke tests: make kind-up / make kind-down.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kubescope
+nodes:
+  - role: control-plane

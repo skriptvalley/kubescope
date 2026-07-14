@@ -14,7 +14,7 @@ func envMap(vars map[string]string) Option {
 	})
 }
 
-func noFiles() Option   { return WithFileExists(func(string) bool { return false }) }
+func noFiles() Option { return WithFileExists(func(string) bool { return false }) }
 func homeDir(p string) Option {
 	return WithUserHome(func() (string, error) { return p, nil })
 }
@@ -73,10 +73,10 @@ func TestLoad(t *testing.T) {
 			wantErr: "invalid port",
 		},
 		{
-			name: "explicit kubeconfig wins over everything",
-			env:  map[string]string{EnvKubeconfig: "/custom/cfg", "KUBECONFIG": "/env/cfg"},
+			name:   "explicit kubeconfig wins over everything",
+			env:    map[string]string{EnvKubeconfig: "/custom/cfg", "KUBECONFIG": "/env/cfg"},
 			exists: map[string]bool{"/kubeconfig": true},
-			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/custom/cfg", AuthMode: "none"},
+			want:   Config{ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/custom/cfg", AuthMode: "none"},
 		},
 		{
 			name:   "mounted /kubeconfig wins over KUBECONFIG env",

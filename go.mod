@@ -65,3 +65,5 @@ require (
 )
 
 tool sigs.k8s.io/controller-runtime/tools/setup-envtest
+
+ignore ./web/node_modules

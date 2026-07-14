@@ -20,9 +20,9 @@ const (
 )
 
 const (
-	defaultListenAddr    = "127.0.0.1:8080"
-	defaultKubeconfig    = "/kubeconfig"
-	defaultAuthMode      = "none"
+	defaultListenAddr     = "127.0.0.1:8080"
+	defaultKubeconfig     = "/kubeconfig"
+	defaultAuthMode       = "none"
 	fallbackKubeconfigRel = ".kube/config"
 )
 
