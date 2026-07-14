@@ -19,6 +19,13 @@ export function NamespaceSelector({
   isLoading,
   disabled,
 }: NamespaceSelectorProps) {
+  // A controlled <select> with no matching <option> would silently display the
+  // first option while the actual filter is `value` (e.g. a deep-linked or
+  // since-deleted namespace, or before the list loads). Surface `value` as an
+  // option so the shown namespace always matches the active filter.
+  const options =
+    value !== ALL_NAMESPACES && !namespaces.includes(value) ? [value, ...namespaces] : namespaces;
+
   return (
     <label className="flex items-center gap-2 text-sm">
       <span className="text-muted-foreground">Namespace</span>
@@ -34,7 +41,7 @@ export function NamespaceSelector({
         )}
       >
         <option value={ALL_NAMESPACES}>{isLoading ? "Loading…" : "All namespaces"}</option>
-        {namespaces.map((ns) => (
+        {options.map((ns) => (
           <option key={ns} value={ns}>
             {ns}
           </option>

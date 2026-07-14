@@ -44,7 +44,7 @@ func (f *fakeProvider) ExecGuidance(string) string { return "" }
 
 func (f *fakeProvider) Dynamic() (dynamic.Interface, error) { return nil, f.err }
 
-func (f *fakeProvider) Discovery() (discovery.DiscoveryInterface, error) {
+func (f *fakeProvider) DiscoveryFor(string) (discovery.DiscoveryInterface, error) {
 	if f.clientset == nil {
 		return nil, f.err
 	}

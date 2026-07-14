@@ -165,4 +165,4 @@
 
 ## Feedback / Review Tasks
 <!-- Format: - [ ] FB-<n>: <description> (source: <sprint/review>, priority: <hi/med/lo>) -->
-_None yet._
+- [ ] FB-1: `writeEngineError` collapses every non-NotFound/Forbidden apiserver error to `502 cluster_unreachable` (+ADR-0004 guidance); a genuine apiserver 5xx/conflict is then mislabeled. Kept consistent with the existing overview handler for now — revisit the error taxonomy when mutations land (Sprint 5). (source: sprint-2 review, priority: lo)

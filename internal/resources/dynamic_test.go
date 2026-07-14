@@ -2,6 +2,7 @@ package resources
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,11 +10,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestParseGVR(t *testing.T) {
@@ -95,8 +98,9 @@ func unstructuredWidget(name, namespace string) *unstructured.Unstructured {
 // genericTestServer wires the generic routes on a real chi router so URL params
 // are populated exactly as in production, backed by a fake dynamic client and a
 // discovery service that knows a namespaced CRD (widgets) and a cluster-scoped
-// core kind (nodes).
-func genericTestServer(t *testing.T, objects ...*unstructured.Unstructured) http.Handler {
+// core kind (nodes). It returns the fake dynamic client so tests can inject
+// reactors (e.g. a Forbidden error).
+func genericTestServer(t *testing.T, objects ...*unstructured.Unstructured) (http.Handler, *dynamicfake.FakeDynamicClient) {
 	t.Helper()
 	objs := make([]runtime.Object, 0, len(objects))
 	for _, o := range objects {
@@ -116,11 +120,11 @@ func genericTestServer(t *testing.T, objects ...*unstructured.Unstructured) http
 	r.Get("/resources/{group}/{version}/{resource}", ListHandler(cluster, svc, discardLogger()))
 	r.Get("/resources/{group}/{version}/{resource}/{name}", GetHandler(cluster, svc, discardLogger()))
 	r.Get("/resources/{group}/{version}/{resource}/{name}/yaml", YAMLHandler(cluster, svc, discardLogger()))
-	return r
+	return r, dc
 }
 
 func TestGenericHandlers(t *testing.T) {
-	srv := genericTestServer(t, unstructuredWidget("w1", "default"), unstructuredWidget("w2", "kube-system"))
+	srv, _ := genericTestServer(t, unstructuredWidget("w1", "default"), unstructuredWidget("w2", "kube-system"))
 
 	do := func(path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -188,4 +192,19 @@ func TestGenericHandlers(t *testing.T) {
 		assert.Contains(t, body.YAML, "kind: Widget")
 		assert.Contains(t, body.YAML, "name: w1")
 	})
+}
+
+func TestGenericHandlerForbidden(t *testing.T) {
+	srv, dc := genericTestServer(t, unstructuredWidget("w1", "default"))
+	// RBAC-restricted read: the apiserver returns Forbidden for the Get.
+	dc.PrependReactor("get", "widgets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Group: "example.com", Resource: "widgets"}, "w1", errors.New("access denied"))
+	})
+
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/resources/example.com/v1/widgets/w1?namespace=default", nil))
+
+	assert.Equal(t, http.StatusForbidden, rec.Code, "body: %s", rec.Body.String())
+	assert.Equal(t, "forbidden", errorCode(t, rec.Body.Bytes()))
 }

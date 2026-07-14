@@ -39,7 +39,7 @@ type fakeDiscoveryCluster struct {
 }
 
 func (f *fakeDiscoveryCluster) ActiveContextName() (string, error) { return f.active, f.activeErr }
-func (f *fakeDiscoveryCluster) Discovery() (discovery.DiscoveryInterface, error) {
+func (f *fakeDiscoveryCluster) DiscoveryFor(string) (discovery.DiscoveryInterface, error) {
 	return f.disc, f.discErr
 }
 

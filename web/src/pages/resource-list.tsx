@@ -31,14 +31,20 @@ export function ResourceListPage() {
 
   const { data: discovery } = useDiscovery();
   const info = findResource(discovery, { group, version, resource });
-  const namespaced = info?.namespaced ?? false;
+  const discoveryNamespaced = info?.namespaced; // undefined until discovery resolves
   const title = info?.kind ?? resource;
 
-  // Only namespaced kinds carry a namespace scope; cluster-scoped lists never
-  // send one (the backend rejects it).
-  const effectiveNamespace = namespaced && ns ? ns : undefined;
+  // List scope: send the selected namespace unless discovery has positively told
+  // us the kind is cluster-scoped. A namespaced deep-link (…?ns=x) then lists the
+  // right namespace on the FIRST request instead of briefly listing all
+  // namespaces while discovery loads; cluster-scoped lists still never send one.
+  const effectiveNamespace = discoveryNamespaced === false ? undefined : ns || undefined;
   const list = useResourceList({ group, version, resource, namespace: effectiveNamespace });
   const namespaces = useNamespaces();
+
+  // The list response's `namespaced` is authoritative and same-response; prefer
+  // it for the selector and detail links, falling back to discovery pre-load.
+  const namespaced = list.data?.namespaced ?? discoveryNamespaced ?? false;
 
   const setNamespace = useCallback(
     (value: string) => {

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -41,6 +41,7 @@ function renderDetail(route = "/resources/apps/v1/deployments/default/web") {
             path="/resources/:group/:version/:resource/:namespace/:name"
             element={<ResourceDetailPage />}
           />
+          <Route path="/resources/:group/:version/:resource/:name" element={<ResourceDetailPage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -80,6 +81,18 @@ describe("ResourceDetailPage", () => {
     const view = await screen.findByTestId("yaml-view");
     expect(view.textContent).toContain("kind: Deployment");
     expect(yamlMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the namespace when the object is cluster-scoped (4-segment route)", async () => {
+    getMock.mockResolvedValue({ kind: "Node", metadata: { name: "node-1" } });
+
+    renderDetail("/resources/core/v1/nodes/node-1");
+
+    await waitFor(() =>
+      expect(getMock).toHaveBeenCalledWith(
+        expect.objectContaining({ resource: "nodes", name: "node-1", namespace: undefined }),
+      ),
+    );
   });
 
   it("renders a not-found error state", async () => {

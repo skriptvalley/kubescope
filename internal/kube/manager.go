@@ -26,6 +26,12 @@ import (
 // unreachable cluster can never stall the others or the request.
 const defaultProbeTimeout = 5 * time.Second
 
+// discoveryTimeout bounds a discovery enumeration so a black-hole apiserver
+// (TCP connects but never responds) fails fast as a 502 instead of parking the
+// handler goroutine forever. Discovery walks every group, so it is given more
+// headroom than a single-call health probe.
+const discoveryTimeout = 15 * time.Second
+
 // Manager parses the kubeconfig on demand, tracks the active context in memory,
 // and caches a successfully-built rest.Config + clientset per context. Failures
 // are not cached, so a kubeconfig that appears (or is fixed) after startup is
@@ -45,6 +51,9 @@ type cachedClient struct {
 	// dynamicClient serves the generic resource engine (ADR-0003): get/list
 	// for any GVR, including CRDs, via unstructured objects.
 	dynamicClient dynamic.Interface
+	// discoveryClient enumerates API groups/resources. It is built from a
+	// timeout-bearing copy of restConfig so discovery can never hang.
+	discoveryClient discovery.DiscoveryInterface
 }
 
 // NewManager returns a Manager reading the kubeconfig at path. The file is not
@@ -174,14 +183,16 @@ func (m *Manager) DynamicFor(name string) (dynamic.Interface, error) {
 	return cached.dynamicClient, nil
 }
 
-// Discovery returns a discovery client for the active context, used to
+// DiscoveryFor returns a discovery client for the named context, used to
 // enumerate every API group/version/resource the cluster serves (Sprint 2).
-func (m *Manager) Discovery() (discovery.DiscoveryInterface, error) {
-	cs, err := m.Clientset()
+// Callers resolve the active context name once and pass it here so the name
+// and the client cannot diverge under a concurrent context switch.
+func (m *Manager) DiscoveryFor(name string) (discovery.DiscoveryInterface, error) {
+	cached, err := m.clientsFor(name)
 	if err != nil {
 		return nil, err
 	}
-	return cs.Discovery(), nil
+	return cached.discoveryClient, nil
 }
 
 // clientsFor builds (once) and caches the typed and dynamic clients for a
@@ -212,7 +223,15 @@ func (m *Manager) clientsFor(name string) (*cachedClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("building dynamic client for context %q: %w", name, err)
 	}
-	cached = &cachedClient{restConfig: restCfg, clientset: cs, dynamicClient: dyn}
+	// Discovery gets its own timeout-bearing config copy; the shared restCfg
+	// (used by the typed and dynamic clients) is left without a global timeout.
+	discCfg := rest.CopyConfig(restCfg)
+	discCfg.Timeout = discoveryTimeout
+	disc, err := discovery.NewDiscoveryClientForConfig(discCfg)
+	if err != nil {
+		return nil, fmt.Errorf("building discovery client for context %q: %w", name, err)
+	}
+	cached = &cachedClient{restConfig: restCfg, clientset: cs, dynamicClient: dyn, discoveryClient: disc}
 	m.clients[name] = cached
 	return cached, nil
 }

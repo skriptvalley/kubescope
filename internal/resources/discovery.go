@@ -46,10 +46,13 @@ type APIResourceInfo struct {
 }
 
 // DiscoveryCluster is the slice of Cluster the discovery service needs. The
-// full *kube.Manager satisfies it; tests supply a fake.
+// full *kube.Manager satisfies it; tests supply a fake. DiscoveryFor takes an
+// explicit context name so the service can resolve the active context once and
+// fetch + cache under that same name — a concurrent switch cannot then store
+// one cluster's resources under another's cache key.
 type DiscoveryCluster interface {
 	ActiveContextName() (string, error)
-	Discovery() (discovery.DiscoveryInterface, error)
+	DiscoveryFor(name string) (discovery.DiscoveryInterface, error)
 }
 
 // DiscoveryService enumerates API groups/resources per context and caches the
@@ -87,7 +90,10 @@ func (s *DiscoveryService) Get(refresh bool) (DiscoveryResult, error) {
 		}
 	}
 
-	disc, err := s.cluster.Discovery()
+	// Fetch discovery for the exact name we cache under, not "whatever is active
+	// now" — otherwise a switch between here and the cache write could store the
+	// new cluster's resources under the old context's key.
+	disc, err := s.cluster.DiscoveryFor(name)
 	if err != nil {
 		return DiscoveryResult{}, &kubeconfigError{err}
 	}

@@ -27,10 +27,12 @@ type Cluster interface {
 	// ExecGuidance returns ADR-0004 exec-plugin guidance for a context that
 	// uses an exec credential plugin, or "" otherwise.
 	ExecGuidance(name string) string
-	// Dynamic and Discovery back the generic resource engine (ADR-0003):
-	// enumerate every GVR incl. CRDs, then get/list any of them.
+	// Dynamic and DiscoveryFor back the generic resource engine (ADR-0003):
+	// enumerate every GVR incl. CRDs, then get/list any of them. DiscoveryFor
+	// takes an explicit context name (see DiscoveryCluster) so the cache key
+	// and the fetched client cannot diverge under a concurrent switch.
 	Dynamic() (dynamic.Interface, error)
-	Discovery() (discovery.DiscoveryInterface, error)
+	DiscoveryFor(name string) (discovery.DiscoveryInterface, error)
 }
 
 // maxSwitchBodyBytes caps the context-switch request body; the payload is a

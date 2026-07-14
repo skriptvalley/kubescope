@@ -101,6 +101,20 @@ describe("ResourceListPage", () => {
     expect(screen.getByText("Deployment")).toBeInTheDocument();
   });
 
+  it("forwards the selected namespace for a namespaced kind", async () => {
+    discoveryMock.mockResolvedValue(deploymentsDiscovery);
+    listMock.mockResolvedValue(
+      deploymentList([{ name: "web", namespace: "default", creationTimestamp: "2026-07-14T10:00:00Z" }]),
+    );
+
+    renderList("/resources/apps/v1/deployments?ns=default");
+
+    expect(await screen.findByRole("link", { name: "web" })).toBeInTheDocument();
+    expect(listMock).toHaveBeenCalledWith(
+      expect.objectContaining({ resource: "deployments", namespace: "default" }),
+    );
+  });
+
   it("hides the namespace selector for a cluster-scoped kind", async () => {
     discoveryMock.mockResolvedValue(nodesDiscovery);
     listMock.mockResolvedValue({
@@ -120,6 +134,10 @@ describe("ResourceListPage", () => {
 
     expect(await screen.findByRole("link", { name: "node-1" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Namespace")).not.toBeInTheDocument();
+    // A cluster-scoped list must never send a namespace (the backend 400s on one).
+    for (const call of listMock.mock.calls) {
+      expect(call[0].namespace).toBeUndefined();
+    }
   });
 
   it("shows an empty state when there are no objects", async () => {

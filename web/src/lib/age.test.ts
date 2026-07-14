@@ -18,6 +18,11 @@ describe("formatAge", () => {
     expect(formatAge("2024-07-14T12:00:00Z", now)).toBe("2y");
   });
 
+  it("shows hours through the 24–48h window, then switches to days at 48h", () => {
+    expect(formatAge("2026-07-13T06:00:00Z", now)).toBe("30h"); // 30h ago, still hours
+    expect(formatAge("2026-07-12T12:00:00Z", now)).toBe("2d"); // exactly 48h → days
+  });
+
   it("clamps a future timestamp to 0s", () => {
     expect(formatAge("2026-07-14T12:00:30Z", now)).toBe("0s");
   });

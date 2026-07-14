@@ -43,7 +43,7 @@ func (f *fakeCluster) Contexts() ([]kube.ContextInfo, error)    { return f.conte
 func (f *fakeCluster) SwitchContext(name string) error          { f.switched = name; return f.switchErr }
 func (f *fakeCluster) ExecGuidance(string) string               { return f.execGuidance }
 func (f *fakeCluster) Dynamic() (dynamic.Interface, error)      { return f.dynamic, f.dynamicErr }
-func (f *fakeCluster) Discovery() (discovery.DiscoveryInterface, error) {
+func (f *fakeCluster) DiscoveryFor(string) (discovery.DiscoveryInterface, error) {
 	return f.discovery, f.discoveryErr
 }
 func (f *fakeCluster) ProbeAll(context.Context) ([]kube.ContextHealth, error) {
