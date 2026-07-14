@@ -10,10 +10,10 @@
 
 ## Current state
 - Last updated: 2026-07-14
-- Last work: Sprint 1 — Kubeconfig & context management + cluster overview [sprint]
-- Summary: Multi-context support end-to-end: `internal/kube` enumerates contexts, switches the active one (in-memory, kubeconfig read-only), and caches a race-safe rest.Config/clientset per context. New APIs `/api/v1/contexts`, `/contexts/switch`, `/contexts/health` (concurrent probes, exec-plugin → ADR-0004 guidance), `/overview`. UI header context switcher with health badges + cluster overview page; switch invalidates all TanStack Query caches. Manual smoke on two kind clusters confirmed overview/nodes change per cluster. `make test` (race+envtest), lint, and fe-test green.
-- Next expected: Sprint 2 — Generic resource engine (read-only)
-- ADRs touched this session: none
+- Last work: Sprint 2 — Generic resource engine (read-only) [sprint]
+- Summary: Browse ANY resource type incl. CRDs read-only. Backend: `internal/resources` discovery service (per-context cache + explicit `?refresh=true`, partial-failure warnings) and dynamic-client generic list/get/yaml with cluster/namespace scope validation and structured 404 (unknown_resource/not_found) / 400 (invalid_scope) mapping; new APIs `/api/v1/discovery`, `/namespaces`, `/resources/{group}/{version}/{resource}[/{name}[/yaml]]` (core group travels as the `core` token). `internal/kube` now caches a dynamic client per context. UI: discovery-driven sidebar nav grouped by API group, generic TanStack Table list (name/namespace/age, client-side sort) with namespace selector, generic detail view (labels/annotations/ownerRefs/age) + read-only highlighted YAML tab, deep-linkable routes. Manual kind smoke: installed a CRD + CR, browsed discovery/list/get/yaml end-to-end, verified scope 400s and a post-startup CRD appearing only on refresh. `make test` (race+envtest incl. a registered CRD), lint, fe-test (57) and build all green.
+- Next expected: Sprint 3 — Workload deep views
+- ADRs touched this session: none (implements ADR-0003 as specified)
 
 ## Sprint board
 
@@ -52,21 +52,21 @@
   - [x] Overview API (server version, node count, namespace list)
   - [x] Overview page UI
 
-### Sprint 2 — Generic resource engine (read-only) — [todo]
+### Sprint 2 — Generic resource engine (read-only) — [done]
 - Story 2.1 — Discovery: enumerate all API groups/resources incl. CRDs (cached, refreshable)
-  - [ ] Discovery of all groups/resources incl. CRDs
-  - [ ] Caching + manual refresh
+  - [x] Discovery of all groups/resources incl. CRDs
+  - [x] Caching + manual refresh
 - Story 2.2 — Dynamic client get/list; cluster- vs namespace-scoped handling; namespace selector API
-  - [ ] Dynamic get/list for any GVK
-  - [ ] Cluster- vs namespace-scoped handling
-  - [ ] Namespace selector API
+  - [x] Dynamic get/list for any GVK
+  - [x] Cluster- vs namespace-scoped handling
+  - [x] Namespace selector API
 - Story 2.3 — Generic resource list UI (TanStack Table, sidebar nav built from discovery, namespace selector)
-  - [ ] TanStack Table generic list
-  - [ ] Sidebar nav built from discovery
-  - [ ] Namespace selector UI
+  - [x] TanStack Table generic list
+  - [x] Sidebar nav built from discovery
+  - [x] Namespace selector UI
 - Story 2.4 — Generic resource detail view + raw YAML tab
-  - [ ] Generic detail view
-  - [ ] Raw YAML tab
+  - [x] Generic detail view
+  - [x] Raw YAML tab
 
 ### Sprint 3 — Workload deep views — [todo]
 - Story 3.1 — Typed backend summaries for Pods, Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs
