@@ -10,33 +10,33 @@
 
 ## Current state
 - Last updated: 2026-07-14
-- Last work: Session 0 — Bootstrap (scaffolding, docs, ADRs, prompts, skills) [sprint]
-- Summary: Repo bootstrapped: docs, ADRs 0001–0006, sprint prompts 0–8, skills, scaffold. No application code yet.
-- Next expected: Sprint 0 — Walking skeleton & deployment spine
-- ADRs touched this session: 0001–0006 (created)
+- Last work: Sprint 0 — Walking skeleton & deployment spine [sprint]
+- Summary: Walking skeleton proven end-to-end: single binary (embedded SPA) in a distroless multi-arch image lists kind-cluster nodes in the browser via mounted kubeconfig. Go+FE tests (incl. envtest) and lint green; smoke scripted in `make smoke`.
+- Next expected: Sprint 1 — Kubeconfig & context management + cluster overview
+- ADRs touched this session: none
 
 ## Sprint board
 
-### Sprint 0 — Walking skeleton & deployment spine — [todo]
+### Sprint 0 — Walking skeleton & deployment spine — [done]
 - Story 0.1 — Go module & HTTP server skeleton
-  - [ ] Init module `github.com/skriptvalley/kubescope`; entrypoint in `cmd/kubescope`
-  - [ ] chi router + slog + `/healthz`
-  - [ ] Env config loading/validation in `internal/config` (`KUBESCOPE_*`)
+  - [x] Init module `github.com/skriptvalley/kubescope`; entrypoint in `cmd/kubescope`
+  - [x] chi router + slog + `/healthz`
+  - [x] Env config loading/validation in `internal/config` (`KUBESCOPE_*`)
 - Story 0.2 — Frontend scaffold
-  - [ ] Vite + React 18 + TS app in `web/`
-  - [ ] Tailwind + shadcn/ui setup
-  - [ ] TanStack Query + react-router wiring
+  - [x] Vite + React 18 + TS app in `web/`
+  - [x] Tailwind + shadcn/ui setup
+  - [x] TanStack Query + react-router wiring
 - Story 0.3 — Single binary: embed built FE via `embed.FS`, SPA fallback serving
-  - [ ] Embed built frontend via `embed.FS`
-  - [ ] SPA fallback serving from the Go server
+  - [x] Embed built frontend via `embed.FS`
+  - [x] SPA fallback serving from the Go server
 - Story 0.4 — Prove the model: load mounted kubeconfig, list nodes via client-go, render node list in UI
-  - [ ] Load kubeconfig from `KUBESCOPE_KUBECONFIG` (with fallbacks)
-  - [ ] Node list API via client-go
-  - [ ] Render node list in the UI
+  - [x] Load kubeconfig from `KUBESCOPE_KUBECONFIG` (with fallbacks)
+  - [x] Node list API via client-go
+  - [x] Render node list in the UI
 - Story 0.5 — Multi-stage multi-arch Dockerfile + real Makefile targets + kind config in deploy/
-  - [ ] Multi-stage Dockerfile (node → go → minimal runtime)
-  - [ ] Multi-arch build (amd64 + arm64)
-  - [ ] Makefile targets + kind config in `deploy/`
+  - [x] Multi-stage Dockerfile (node → go → minimal runtime)
+  - [x] Multi-arch build (amd64 + arm64)
+  - [x] Makefile targets + kind config in `deploy/`
 
 ### Sprint 1 — Kubeconfig & context management + cluster overview — [todo]
 - Story 1.1 — Kubeconfig parsing & context enumeration API
