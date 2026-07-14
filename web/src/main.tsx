@@ -5,6 +5,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom"
 
 import { Layout } from "@/components/layout";
 import { NodesPage } from "@/pages/nodes";
+import { OverviewPage } from "@/pages/overview";
 
 import "./index.css";
 
@@ -22,7 +23,8 @@ const router = createBrowserRouter([
     path: "/",
     element: <Layout />,
     children: [
-      { index: true, element: <Navigate to="/nodes" replace /> },
+      { index: true, element: <Navigate to="/overview" replace /> },
+      { path: "overview", element: <OverviewPage /> },
       { path: "nodes", element: <NodesPage /> },
     ],
   },
