@@ -21,8 +21,18 @@ export function useContextsHealth() {
 }
 
 /** Query keys that hold data scoped to a specific cluster; dropped on switch so
- *  a previously-visited view can never render the prior cluster's cached data. */
-const clusterDataKeys = [["overview"], ["nodes"]];
+ *  a previously-visited view can never render the prior cluster's cached data.
+ *  Includes the generic engine's caches: discovery, namespaces and any
+ *  resource list/object/YAML (matched by key prefix). */
+const clusterDataKeys = [
+  ["overview"],
+  ["nodes"],
+  ["discovery"],
+  ["namespaces"],
+  ["resource-list"],
+  ["resource-get"],
+  ["resource-yaml"],
+];
 
 /** Switch the active context, then drop every cluster-scoped cache and refetch
  *  so all views (mounted or not) show the new cluster, never stale data. */

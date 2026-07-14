@@ -46,12 +46,23 @@ func New(opts Options) http.Handler {
 		api.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed for this API route")
 		})
+		// One discovery service per server: caches each context's API
+		// enumeration and is shared by the discovery and generic get/list
+		// handlers so GVR resolution reuses the same cache (ADR-0003).
+		disco := resources.NewDiscoveryService(opts.Kube)
 		api.Route("/v1", func(v1 chi.Router) {
 			v1.Get("/nodes", resources.NodesHandler(opts.Kube, opts.Logger))
 			v1.Get("/contexts", resources.ContextsHandler(opts.Kube, opts.Logger))
 			v1.Post("/contexts/switch", resources.SwitchContextHandler(opts.Kube, opts.Logger))
 			v1.Get("/contexts/health", resources.HealthHandler(opts.Kube, opts.Logger))
 			v1.Get("/overview", resources.OverviewHandler(opts.Kube, opts.Logger))
+			v1.Get("/namespaces", resources.NamespacesHandler(opts.Kube, opts.Logger))
+			v1.Get("/discovery", resources.DiscoveryHandler(disco, opts.Kube, opts.Logger))
+			// Generic resource engine: any GVR via the dynamic client. The
+			// core group travels as the literal token "core" in the path.
+			v1.Get("/resources/{group}/{version}/{resource}", resources.ListHandler(opts.Kube, disco, opts.Logger))
+			v1.Get("/resources/{group}/{version}/{resource}/{name}", resources.GetHandler(opts.Kube, disco, opts.Logger))
+			v1.Get("/resources/{group}/{version}/{resource}/{name}/yaml", resources.YAMLHandler(opts.Kube, disco, opts.Logger))
 		})
 	})
 

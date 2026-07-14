@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/skriptvalley/kubescope/internal/kube"
@@ -25,6 +27,12 @@ type Cluster interface {
 	// ExecGuidance returns ADR-0004 exec-plugin guidance for a context that
 	// uses an exec credential plugin, or "" otherwise.
 	ExecGuidance(name string) string
+	// Dynamic and DiscoveryFor back the generic resource engine (ADR-0003):
+	// enumerate every GVR incl. CRDs, then get/list any of them. DiscoveryFor
+	// takes an explicit context name (see DiscoveryCluster) so the cache key
+	// and the fetched client cannot diverge under a concurrent switch.
+	Dynamic() (dynamic.Interface, error)
+	DiscoveryFor(name string) (discovery.DiscoveryInterface, error)
 }
 
 // maxSwitchBodyBytes caps the context-switch request body; the payload is a

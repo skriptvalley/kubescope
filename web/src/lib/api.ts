@@ -34,12 +34,111 @@ export interface Overview {
   namespaces: string[];
 }
 
+/** One resource type the active cluster serves (core kind or CRD). */
+export interface APIResourceInfo {
+  group: string;
+  version: string;
+  resource: string;
+  kind: string;
+  namespaced: boolean;
+  verbs: string[];
+}
+
+/** One API group and its browsable resources. `name` is "" for the core group. */
+export interface APIGroupInfo {
+  name: string;
+  resources: APIResourceInfo[];
+}
+
+export interface Discovery {
+  groups: APIGroupInfo[];
+  /** Per-group discovery failures; the reachable groups are still returned. */
+  warnings?: string[];
+}
+
+/** A server-described list column. The frontend renders whatever the API says. */
+export interface ResourceColumn {
+  id: string;
+  header: string;
+}
+
+export interface ResourceRow {
+  name: string;
+  namespace?: string;
+  creationTimestamp?: string;
+  uid?: string;
+}
+
+export interface ResourceList {
+  group: string;
+  version: string;
+  resource: string;
+  kind: string;
+  namespaced: boolean;
+  columns: ResourceColumn[];
+  rows: ResourceRow[];
+}
+
+/** A generic Kubernetes object as returned by the get endpoint. */
+export interface KubeObject {
+  apiVersion?: string;
+  kind?: string;
+  metadata?: {
+    name?: string;
+    namespace?: string;
+    uid?: string;
+    creationTimestamp?: string;
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
+    ownerReferences?: OwnerReference[];
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+export interface OwnerReference {
+  apiVersion?: string;
+  kind?: string;
+  name?: string;
+  uid?: string;
+  controller?: boolean;
+}
+
+/** Path/query params identifying a resource collection or a single object. */
+export interface ResourceRef {
+  group: string;
+  version: string;
+  resource: string;
+  namespace?: string;
+  name?: string;
+}
+
+/** The URL token standing in for the empty core API group ("" is unusable in a path). */
+export const CORE_GROUP_TOKEN = "core";
+
+/** Maps a group name to its URL token, "" → "core". */
+export function groupToken(group: string): string {
+  return group === "" ? CORE_GROUP_TOKEN : group;
+}
+
 interface ContextListResponse {
   items: ContextInfo[];
 }
 
 interface HealthListResponse {
   items: ContextHealth[];
+}
+
+interface NamespaceListResponse {
+  items: string[];
+}
+
+interface ObjectResponse {
+  object: KubeObject;
+}
+
+interface YamlResponse {
+  yaml: string;
 }
 
 interface ErrorEnvelope {
@@ -112,4 +211,31 @@ export const api = {
       ).items,
   },
   overview: async (): Promise<Overview> => request<Overview>("/api/v1/overview"),
+  namespaces: {
+    list: async (): Promise<string[]> =>
+      (await request<NamespaceListResponse>("/api/v1/namespaces")).items,
+  },
+  resources: {
+    discovery: async (refresh = false): Promise<Discovery> =>
+      request<Discovery>(`/api/v1/discovery${refresh ? "?refresh=true" : ""}`),
+    list: async (ref: ResourceRef): Promise<ResourceList> =>
+      request<ResourceList>(`/api/v1/resources/${ref.group}/${ref.version}/${ref.resource}${nsQuery(ref.namespace)}`),
+    get: async (ref: ResourceRef): Promise<KubeObject> =>
+      (
+        await request<ObjectResponse>(
+          `/api/v1/resources/${ref.group}/${ref.version}/${ref.resource}/${encodeURIComponent(ref.name ?? "")}${nsQuery(ref.namespace)}`,
+        )
+      ).object,
+    yaml: async (ref: ResourceRef): Promise<string> =>
+      (
+        await request<YamlResponse>(
+          `/api/v1/resources/${ref.group}/${ref.version}/${ref.resource}/${encodeURIComponent(ref.name ?? "")}/yaml${nsQuery(ref.namespace)}`,
+        )
+      ).yaml,
+  },
 };
+
+/** Builds the `?namespace=` query, or "" when no namespace is given. */
+function nsQuery(namespace?: string): string {
+  return namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
+}
