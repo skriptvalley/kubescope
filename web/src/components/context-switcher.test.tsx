@@ -91,7 +91,7 @@ describe("ContextSwitcher", () => {
     expect(screen.getByText("Unreachable")).toBeInTheDocument();
   });
 
-  it("switches context, drops cluster caches, and globally invalidates so views refetch", async () => {
+  it("switches context, globally invalidates mounted views, and drops only inactive caches", async () => {
     listMock.mockResolvedValue(contexts);
     healthMock.mockResolvedValue([]);
     switchMock.mockResolvedValue([
@@ -109,11 +109,13 @@ describe("ContextSwitcher", () => {
 
     // TanStack Query v5 passes a second context arg to the mutation fn.
     await waitFor(() => expect(switchMock).toHaveBeenCalledWith("dev", expect.anything()));
-    // Stale cluster-scoped data is dropped so a later navigation can't show it.
-    await waitFor(() => expect(removeSpy).toHaveBeenCalledWith({ queryKey: ["overview"] }));
-    expect(removeSpy).toHaveBeenCalledWith({ queryKey: ["nodes"] });
-    // Global invalidation (no filter args) refetches every active view.
-    expect(invalidateSpy).toHaveBeenCalledWith();
+    // Global invalidation (no filter args) refetches every *mounted* view in place.
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith());
+    // Only *inactive* cluster caches are dropped — removing an active query would
+    // strand the current page on stale data (no observer left to refetch it).
+    expect(removeSpy).toHaveBeenCalledWith({ queryKey: ["overview"], type: "inactive" });
+    expect(removeSpy).toHaveBeenCalledWith({ queryKey: ["nodes"], type: "inactive" });
+    expect(removeSpy).not.toHaveBeenCalledWith({ queryKey: ["overview"] });
   });
 
   it("surfaces a failed switch instead of silently reverting", async () => {

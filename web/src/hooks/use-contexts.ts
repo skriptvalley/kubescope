@@ -31,13 +31,17 @@ export function useSwitchContext() {
     onSuccess: (items: ContextInfo[]) => {
       // Seed the fresh context list so the switcher doesn't flash to loading.
       queryClient.setQueryData(["contexts"], items);
-      // Remove data tied to the old cluster (incl. unmounted views) so a later
-      // navigation shows a loading state + fresh fetch, not the prior cluster.
-      for (const key of clusterScopedKeyPrefixes) {
-        queryClient.removeQueries({ queryKey: key });
-      }
-      // Refetch everything still active (health, and any mounted cluster view).
+      // Refetch every mounted view (health + the current cluster page) so the
+      // active page updates in place. Must run before removing anything: a
+      // removed query has no observer to refetch, which would strand the current
+      // page on the prior cluster's data until a manual refresh.
       void queryClient.invalidateQueries();
+      // Drop only the *unmounted* cluster caches so a later navigation refetches
+      // fresh instead of flashing the previous cluster's data. Active queries are
+      // left for invalidateQueries above to refetch.
+      for (const key of clusterScopedKeyPrefixes) {
+        queryClient.removeQueries({ queryKey: key, type: "inactive" });
+      }
     },
   });
 }
