@@ -18,20 +18,22 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-const deployment: KubeObject = {
-  apiVersion: "apps/v1",
-  kind: "Deployment",
+// A non-workload kind exercises the generic Summary tab; workload kinds (Pod,
+// Deployment, …) render their dedicated views tested elsewhere.
+const configmap: KubeObject = {
+  apiVersion: "v1",
+  kind: "ConfigMap",
   metadata: {
-    name: "web",
+    name: "app-config",
     namespace: "default",
     creationTimestamp: "2026-07-14T10:00:00Z",
     labels: { app: "web" },
-    annotations: { "deployment.kubernetes.io/revision": "3" },
-    ownerReferences: [{ kind: "ReplicaSet", name: "web-abc", controller: true }],
+    annotations: { "kubescope.io/note": "3" },
+    ownerReferences: [{ kind: "CustomResource", name: "owner-abc", controller: true }],
   },
 };
 
-function renderDetail(route = "/resources/apps/v1/deployments/default/web") {
+function renderDetail(route = "/resources/core/v1/configmaps/default/app-config") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -55,22 +57,22 @@ beforeEach(() => {
 
 describe("ResourceDetailPage", () => {
   it("renders generic metadata in the summary tab", async () => {
-    getMock.mockResolvedValue(deployment);
+    getMock.mockResolvedValue(configmap);
 
     renderDetail();
 
     // Wait for the object body to load (the title renders from the route param
     // immediately, so key on a field that only appears once metadata arrives).
     expect(await screen.findByText("app=web")).toBeInTheDocument();
-    expect(screen.getByText("web")).toBeInTheDocument(); // title
-    expect(screen.getAllByText(/Deployment/).length).toBeGreaterThan(0);
-    expect(screen.getByText("deployment.kubernetes.io/revision")).toBeInTheDocument();
-    expect(screen.getByText("ReplicaSet/web-abc")).toBeInTheDocument();
+    expect(screen.getByText("app-config")).toBeInTheDocument(); // title
+    expect(screen.getAllByText(/ConfigMap/).length).toBeGreaterThan(0);
+    expect(screen.getByText("kubescope.io/note")).toBeInTheDocument();
+    expect(screen.getByText("CustomResource/owner-abc")).toBeInTheDocument();
   });
 
   it("loads YAML lazily when the YAML tab is opened", async () => {
-    getMock.mockResolvedValue(deployment);
-    yamlMock.mockResolvedValue("kind: Deployment\nmetadata:\n  name: web");
+    getMock.mockResolvedValue(configmap);
+    yamlMock.mockResolvedValue("kind: ConfigMap\nmetadata:\n  name: app-config");
 
     renderDetail();
     await screen.findByText("app=web"); // summary loaded; YAML not fetched yet
@@ -79,7 +81,7 @@ describe("ResourceDetailPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "YAML" }));
 
     const view = await screen.findByTestId("yaml-view");
-    expect(view.textContent).toContain("kind: Deployment");
+    expect(view.textContent).toContain("kind: ConfigMap");
     expect(yamlMock).toHaveBeenCalledTimes(1);
   });
 

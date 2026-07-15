@@ -19,8 +19,28 @@ import { useNamespaces } from "@/hooks/use-namespaces";
 import { useResourceList } from "@/hooks/use-resource";
 import { ApiError, type ResourceRow } from "@/lib/api";
 import { findResource } from "@/lib/discovery-nav";
+import { workloadKind } from "@/lib/workloads";
+import { WorkloadListPage } from "@/pages/workload-list";
 
+/** Route dispatcher: the seven workload kinds get the typed summary view; the
+ *  generic discovery+dynamic engine serves everything else (ADR-0003). The
+ *  branch renders distinct component types, so switching kinds remounts cleanly
+ *  and the two paths never share a hook order. */
 export function ResourceListPage() {
+  const params = useParams();
+  const ref = {
+    group: params.group ?? "",
+    version: params.version ?? "",
+    resource: params.resource ?? "",
+  };
+  const workload = workloadKind(ref);
+  if (workload) {
+    return <WorkloadListPage key={ref.resource} {...ref} kind={workload.kind} />;
+  }
+  return <GenericResourceListPage />;
+}
+
+function GenericResourceListPage() {
   const params = useParams();
   const group = params.group ?? "";
   const version = params.version ?? "";

@@ -63,6 +63,12 @@ func New(opts Options) http.Handler {
 			v1.Get("/resources/{group}/{version}/{resource}", resources.ListHandler(opts.Kube, disco, opts.Logger))
 			v1.Get("/resources/{group}/{version}/{resource}/{name}", resources.GetHandler(opts.Kube, disco, opts.Logger))
 			v1.Get("/resources/{group}/{version}/{resource}/{name}/yaml", resources.YAMLHandler(opts.Kube, disco, opts.Logger))
+			// Typed workload summaries + controller drill-down (Sprint 3):
+			// the hot-path complement to the generic engine (ADR-0003).
+			v1.Get("/workloads/{resource}", resources.WorkloadListHandler(opts.Kube, opts.Logger))
+			v1.Get("/workloads/{resource}/{namespace}/{name}/pods", resources.OwnedPodsHandler(opts.Kube, opts.Logger))
+			v1.Get("/workloads/{resource}/{namespace}/{name}/jobs", resources.OwnedJobsHandler(opts.Kube, opts.Logger))
+			v1.Get("/events", resources.EventsHandler(opts.Kube, opts.Logger))
 		})
 	})
 

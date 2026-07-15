@@ -113,6 +113,124 @@ export interface ResourceRef {
   name?: string;
 }
 
+// --- Typed workload summaries (Sprint 3) -------------------------------------
+// The seven core workload kinds get shaped rows with every field computed by the
+// Go backend; the frontend only renders (ADR-0003). Every summary shares name,
+// namespace and creationTimestamp, so shared table columns key off those.
+
+/** A minimal controller owner reference for linking a resource to its owner. */
+export interface WorkloadOwnerRef {
+  kind: string;
+  name: string;
+  uid?: string;
+}
+
+export interface PodSummary {
+  name: string;
+  namespace: string;
+  ready: string; // "readyContainers/totalContainers"
+  readyContainers: number;
+  totalContainers: number;
+  status: string; // kubectl-style STATUS (Running, CrashLoopBackOff, Init:0/1, …)
+  phase: string;
+  restarts: number;
+  node?: string;
+  owner?: WorkloadOwnerRef;
+  creationTimestamp?: string;
+}
+
+export interface DeploymentSummary {
+  name: string;
+  namespace: string;
+  ready: string;
+  desiredReplicas: number;
+  readyReplicas: number;
+  updatedReplicas: number;
+  availableReplicas: number;
+  rolloutStatus: string;
+  creationTimestamp?: string;
+}
+
+export interface StatefulSetSummary {
+  name: string;
+  namespace: string;
+  ready: string;
+  desiredReplicas: number;
+  readyReplicas: number;
+  currentReplicas: number;
+  updatedReplicas: number;
+  rolloutStatus: string;
+  creationTimestamp?: string;
+}
+
+export interface DaemonSetSummary {
+  name: string;
+  namespace: string;
+  desired: number;
+  current: number;
+  ready: number;
+  upToDate: number;
+  available: number;
+  rolloutStatus: string;
+  creationTimestamp?: string;
+}
+
+export interface ReplicaSetSummary {
+  name: string;
+  namespace: string;
+  ready: string;
+  desiredReplicas: number;
+  currentReplicas: number;
+  readyReplicas: number;
+  owner?: WorkloadOwnerRef;
+  creationTimestamp?: string;
+}
+
+export interface JobSummary {
+  name: string;
+  namespace: string;
+  completions: string;
+  succeeded: number;
+  failed: number;
+  active: number;
+  duration?: string;
+  owner?: WorkloadOwnerRef;
+  creationTimestamp?: string;
+}
+
+export interface CronJobSummary {
+  name: string;
+  namespace: string;
+  schedule: string;
+  suspend: boolean;
+  active: number;
+  lastScheduleTime?: string;
+  creationTimestamp?: string;
+}
+
+/** Union of every typed workload row; all members share name/namespace/age. */
+export type WorkloadSummary =
+  | PodSummary
+  | DeploymentSummary
+  | StatefulSetSummary
+  | DaemonSetSummary
+  | ReplicaSetSummary
+  | JobSummary
+  | CronJobSummary;
+
+/** One shaped event row (involvedObject-filtered, newest-first server-side). */
+export interface EventSummary {
+  type: string; // Normal | Warning
+  reason: string;
+  message: string;
+  count: number;
+  lastSeen?: string;
+}
+
+interface WorkloadListResponse<T> {
+  items: T[];
+}
+
 /** The URL token standing in for the empty core API group ("" is unusable in a path). */
 export const CORE_GROUP_TOKEN = "core";
 
@@ -232,6 +350,31 @@ export const api = {
           `/api/v1/resources/${ref.group}/${ref.version}/${ref.resource}/${encodeURIComponent(ref.name ?? "")}/yaml${nsQuery(ref.namespace)}`,
         )
       ).yaml,
+  },
+  workloads: {
+    /** Typed summary list for one workload kind; T is the matching *Summary. */
+    list: async <T>(resource: string, namespace?: string): Promise<T[]> =>
+      (await request<WorkloadListResponse<T>>(`/api/v1/workloads/${resource}${nsQuery(namespace)}`)).items,
+    /** The pods a controller owns (resolved server-side by selector + ownerRef). */
+    ownedPods: async (resource: string, namespace: string, name: string): Promise<PodSummary[]> =>
+      (
+        await request<WorkloadListResponse<PodSummary>>(
+          `/api/v1/workloads/${resource}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/pods`,
+        )
+      ).items,
+    /** The Jobs a CronJob owns (its active + recent runs). */
+    ownedJobs: async (namespace: string, name: string): Promise<JobSummary[]> =>
+      (
+        await request<WorkloadListResponse<JobSummary>>(
+          `/api/v1/workloads/cronjobs/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/jobs`,
+        )
+      ).items,
+  },
+  /** Events filtered to a single object by involvedObject kind + name (+ namespace). */
+  events: async (ref: { namespace?: string; kind: string; name: string }): Promise<EventSummary[]> => {
+    const params = new URLSearchParams({ kind: ref.kind, name: ref.name });
+    if (ref.namespace) params.set("namespace", ref.namespace);
+    return (await request<WorkloadListResponse<EventSummary>>(`/api/v1/events?${params.toString()}`)).items;
   },
 };
 

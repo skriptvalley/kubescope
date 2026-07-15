@@ -9,11 +9,11 @@
 - Record any ADR added/changed this session.
 
 ## Current state
-- Last updated: 2026-07-14
-- Last work: Sprint 2 — Generic resource engine (read-only) [sprint]
-- Summary: Browse ANY resource type incl. CRDs read-only. Backend: `internal/resources` discovery service (per-context cache + explicit `?refresh=true`, partial-failure warnings) and dynamic-client generic list/get/yaml with cluster/namespace scope validation and structured 404 (unknown_resource/not_found) / 400 (invalid_scope) mapping; new APIs `/api/v1/discovery`, `/namespaces`, `/resources/{group}/{version}/{resource}[/{name}[/yaml]]` (core group travels as the `core` token). `internal/kube` now caches a dynamic client per context. UI: discovery-driven sidebar nav grouped by API group, generic TanStack Table list (name/namespace/age, client-side sort) with namespace selector, generic detail view (labels/annotations/ownerRefs/age) + read-only highlighted YAML tab, deep-linkable routes. Manual kind smoke: installed a CRD + CR, browsed discovery/list/get/yaml end-to-end, verified scope 400s and a post-startup CRD appearing only on refresh. `make test` (race+envtest incl. a registered CRD), lint, fe-test (57) and build all green.
-- Next expected: Sprint 3 — Workload deep views
-- ADRs touched this session: none (implements ADR-0003 as specified)
+- Last updated: 2026-07-15
+- Last work: Sprint 3 — Workload deep views [sprint]
+- Summary: Rich typed views for the seven workload kinds alongside the generic engine (ADR-0003 hot-path handlers). Backend `internal/resources`: typed summary lists `/api/v1/workloads/{resource}` (Pods/Deployments/StatefulSets/DaemonSets/ReplicaSets/Jobs/CronJobs) with every field computed in Go — pod ready-count/kubectl-style STATUS/restarts/node, controller replica health + kubectl-parity rollout-status lines, Job completions/duration, CronJob schedule/suspend/last-run; controller drill-down `/workloads/{resource}/{ns}/{name}/pods` (selector + ownerReferences, Deployment resolves through its ReplicaSets) and `/…/jobs` (CronJob→Jobs); events `/api/v1/events?namespace=&kind=&name=` filtered by involvedObject, newest-first. Generic engine untouched (still serves these kinds). UI: ResourceList/ResourceDetail dispatch workload kinds to typed views — kind-specific TanStack columns with status pills, Pod detail (init/app/ephemeral container states, restarts, conditions, placement, owner link), controller detail (replica stats + rollout line + owned-pods table), reusable events panel (Warning distinct, empty state) embedded on every workload detail. Manual kind smoke: deployed web/crasher Deployments + Job + CronJob, verified all seven lists, owned-pods RS-hop, and Warning/BackOff events on the crashing pod. `make test` (race+envtest incl. typed endpoints/owned-pods/event filtering), lint and build all green; fe-test 84.
+- Next expected: Sprint 4 — Live updates + logs + events
+- ADRs touched this session: none (implements ADR-0003 typed hot-path handlers as specified)
 
 ## Sprint board
 
@@ -68,19 +68,19 @@
   - [x] Generic detail view
   - [x] Raw YAML tab
 
-### Sprint 3 — Workload deep views — [todo]
+### Sprint 3 — Workload deep views — [done]
 - Story 3.1 — Typed backend summaries for Pods, Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs
-  - [ ] Typed summary endpoints for the seven workload kinds
-  - [ ] Table-driven tests for summaries
+  - [x] Typed summary endpoints for the seven workload kinds
+  - [x] Table-driven tests for summaries
 - Story 3.2 — Pod detail: containers, statuses, restarts, conditions, node placement
-  - [ ] Containers, statuses, restarts panels
-  - [ ] Conditions + node placement
+  - [x] Containers, statuses, restarts panels
+  - [x] Conditions + node placement
 - Story 3.3 — Controller views: replicas, rollout status, owned-pod lists
-  - [ ] Replica + rollout status views
-  - [ ] Owned-pod lists
+  - [x] Replica + rollout status views
+  - [x] Owned-pod lists
 - Story 3.4 — Related events on workload detail views
-  - [ ] Per-object events API
-  - [ ] Events panel on detail views
+  - [x] Per-object events API
+  - [x] Events panel on detail views
 
 ### Sprint 4 — Live updates + logs + events — [todo]
 - Story 4.1 — Watch→SSE bridge (informers, per-context fan-out, reconnect handling)

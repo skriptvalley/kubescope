@@ -10,11 +10,15 @@ export function useResourceList(ref: ResourceRef) {
   });
 }
 
-/** A single object's full body (for metadata rendering). */
-export function useResourceObject(ref: ResourceRef) {
+/** A single object's full body (for metadata rendering). `enabled` lets callers
+ *  skip the fetch when the object body is not rendered (e.g. controller detail
+ *  views resolve their own data and only the YAML tab — a separate query —
+ *  needs the raw object). */
+export function useResourceObject(ref: ResourceRef, enabled = true) {
   return useQuery({
     queryKey: ["resource-get", ref.group, ref.version, ref.resource, ref.namespace ?? "", ref.name ?? ""],
     queryFn: () => api.resources.get(ref),
+    enabled,
   });
 }
 
