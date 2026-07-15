@@ -61,6 +61,7 @@ func (f Filter) matches(u *unstructured.Unstructured) bool {
 type Hub struct {
 	cluster     Cluster
 	shaper      Shaper
+	sanitize    ObjectSanitizer
 	logger      *slog.Logger
 	resync      time.Duration
 	eventBuffer int
@@ -68,6 +69,12 @@ type Hub struct {
 	mu        sync.Mutex
 	informers map[hubKey]*sharedGVRInformer
 }
+
+// ObjectSanitizer scrubs a full object before it is sent to a detail subscriber
+// (Sprint 5). It returns the object to ship — the same one when nothing needs
+// hiding, or a masked deep copy (never mutating the shared informer cache) when
+// it does, e.g. redacting Secret data (ADR-0005). Nil means send objects as-is.
+type ObjectSanitizer func(schema.GroupVersionResource, *unstructured.Unstructured) *unstructured.Unstructured
 
 type hubKey struct {
 	context string
@@ -82,6 +89,11 @@ func WithResyncPeriod(d time.Duration) HubOption { return func(h *Hub) { h.resyn
 
 // WithEventBuffer overrides the per-subscriber channel buffer size.
 func WithEventBuffer(n int) HubOption { return func(h *Hub) { h.eventBuffer = n } }
+
+// WithObjectSanitizer installs a sanitizer run on every full object sent to a
+// detail subscriber, so sensitive fields (Secret data) never reach the browser
+// over the watch stream — the same masking the REST detail/YAML paths apply.
+func WithObjectSanitizer(fn ObjectSanitizer) HubOption { return func(h *Hub) { h.sanitize = fn } }
 
 // NewHub builds a Hub over the given cluster and row shaper.
 func NewHub(cluster Cluster, shaper Shaper, logger *slog.Logger, opts ...HubOption) *Hub {
@@ -124,7 +136,7 @@ func (h *Hub) Subscribe(gvr schema.GroupVersionResource, filter Filter) (*Subscr
 	}
 	// Register the handler before starting Run so the first subscriber receives
 	// the initial LIST as adds; later subscribers get the current store replayed.
-	sub := si.addSubscriber(filter, gvr, h.shaper, h.eventBuffer)
+	sub := si.addSubscriber(filter, gvr, h.shaper, h.sanitize, h.eventBuffer)
 	si.refs++
 	si.ensureStarted()
 
@@ -209,12 +221,13 @@ func newSharedGVRInformer(dyn dynamic.Interface, gvr schema.GroupVersionResource
 // cluster-wide and each subscriber filters to its own namespace.
 const metav1NamespaceAll = ""
 
-func (si *sharedGVRInformer) addSubscriber(filter Filter, gvr schema.GroupVersionResource, shaper Shaper, buffer int) *subscriber {
+func (si *sharedGVRInformer) addSubscriber(filter Filter, gvr schema.GroupVersionResource, shaper Shaper, sanitize ObjectSanitizer, buffer int) *subscriber {
 	sub := &subscriber{
-		events: make(chan Event, buffer),
-		filter: filter,
-		gvr:    gvr,
-		shaper: shaper,
+		events:   make(chan Event, buffer),
+		filter:   filter,
+		gvr:      gvr,
+		shaper:   shaper,
+		sanitize: sanitize,
 	}
 	reg, err := si.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(obj any) { sub.deliver(EventAdd, obj) },
@@ -273,11 +286,12 @@ func (si *sharedGVRInformer) stop() {
 
 // subscriber is one registration's channel + filter + resync flag.
 type subscriber struct {
-	events chan Event
-	resync atomic.Bool
-	filter Filter
-	gvr    schema.GroupVersionResource
-	shaper Shaper
+	events   chan Event
+	resync   atomic.Bool
+	filter   Filter
+	gvr      schema.GroupVersionResource
+	shaper   Shaper
+	sanitize ObjectSanitizer
 }
 
 // deliver shapes and fans one informer notification to this subscriber, subject
@@ -297,7 +311,14 @@ func (sub *subscriber) deliver(t EventType, obj any) {
 	} else {
 		ev.Row = sub.shaper(sub.gvr, u)
 		if sub.filter.IncludeObject {
-			ev.Object = u.Object
+			// Scrub the full object before it leaves the server (e.g. Secret data
+			// masking, ADR-0005). The sanitizer returns a masked deep copy when
+			// needed, so the shared informer cache is never mutated.
+			out := u
+			if sub.sanitize != nil {
+				out = sub.sanitize(sub.gvr, u)
+			}
+			ev.Object = out.Object
 		}
 	}
 	select {

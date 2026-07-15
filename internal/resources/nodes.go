@@ -19,11 +19,14 @@ type ClientsetProvider interface {
 	Clientset() (kubernetes.Interface, error)
 }
 
-// NodeSummary is the shaped row the UI renders for one node.
+// NodeSummary is the shaped row the UI renders for one node. Unschedulable
+// backs the schedulability badge and the cordon/uncordon toggle, so a cordon
+// reflects in the node view immediately (Sprint 5).
 type NodeSummary struct {
-	Name    string `json:"name"`
-	Status  string `json:"status"`
-	Version string `json:"version"`
+	Name          string `json:"name"`
+	Status        string `json:"status"`
+	Version       string `json:"version"`
+	Unschedulable bool   `json:"unschedulable"`
 }
 
 type nodeList struct {
@@ -54,9 +57,10 @@ func NodesHandler(provider ClientsetProvider, logger *slog.Logger) http.HandlerF
 		summaries := make([]NodeSummary, 0, len(nodes.Items))
 		for _, node := range nodes.Items {
 			summaries = append(summaries, NodeSummary{
-				Name:    node.Name,
-				Status:  nodeStatus(node),
-				Version: node.Status.NodeInfo.KubeletVersion,
+				Name:          node.Name,
+				Status:        nodeStatus(node),
+				Version:       node.Status.NodeInfo.KubeletVersion,
+				Unschedulable: node.Spec.Unschedulable,
 			})
 		}
 		writeJSON(w, logger, http.StatusOK, nodeList{Items: summaries})

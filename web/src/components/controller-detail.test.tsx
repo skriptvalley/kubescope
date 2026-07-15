@@ -48,12 +48,12 @@ const ownedPod: PodSummary = {
   creationTimestamp: "2026-07-14T10:00:00Z",
 };
 
-function renderController(resource = "deployments", kind = "Deployment", name = "web") {
+function renderController(resource = "deployments", kind = "Deployment", name = "web", readOnly = true) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <ControllerDetail resource={resource} kind={kind} namespace="default" name={name} />
+        <ControllerDetail resource={resource} kind={kind} namespace="default" name={name} readOnly={readOnly} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -97,6 +97,27 @@ describe("ControllerDetail", () => {
 
     renderController();
     expect(await screen.findByText(/no pods owned by this controller/i)).toBeInTheDocument();
+  });
+
+  it("shows scale and restart controls when writable", async () => {
+    listMock.mockResolvedValue([deploymentRow]);
+    ownedPodsMock.mockResolvedValue([ownedPod]);
+
+    renderController("deployments", "Deployment", "web", false);
+
+    const actions = await screen.findByTestId("controller-actions");
+    expect(within(actions).getByRole("button", { name: /scale/i })).toBeInTheDocument();
+    expect(within(actions).getByRole("button", { name: /restart/i })).toBeInTheDocument();
+  });
+
+  it("hides mutation controls in read-only mode", async () => {
+    listMock.mockResolvedValue([deploymentRow]);
+    ownedPodsMock.mockResolvedValue([ownedPod]);
+
+    renderController("deployments", "Deployment", "web", true);
+
+    await screen.findByText("2/3");
+    expect(screen.queryByTestId("controller-actions")).not.toBeInTheDocument();
   });
 
   it("renders a CronJob's schedule and its owned Jobs instead of pods", async () => {

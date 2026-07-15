@@ -5,6 +5,15 @@ export interface NodeSummary {
   name: string;
   status: string;
   version: string;
+  /** spec.unschedulable — backs the schedulability badge and cordon toggle. */
+  unschedulable: boolean;
+}
+
+/** Server posture the UI reflects (read-only, auth mode). Read-only enforcement
+ *  is server-side middleware; this only drives control visibility (ADR-0005). */
+export interface ServerConfig {
+  readOnly: boolean;
+  authMode: string;
 }
 
 interface NodeListResponse {
@@ -333,10 +342,38 @@ async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(message, code, response.status, guidance);
 }
 
+/** Per-pod outcome of a node drain. */
+export interface PodDrainResult {
+  namespace: string;
+  name: string;
+  result: "evicted" | "skipped" | "blocked" | "error";
+  reason?: string;
+}
+
+/** Whole-node drain result: every pod plus tallies. */
+export interface DrainResult {
+  node: string;
+  pods: PodDrainResult[];
+  evicted: number;
+  skipped: number;
+  blocked: number;
+  failed: number;
+}
+
 export const api = {
+  config: async (): Promise<ServerConfig> => request<ServerConfig>("/api/v1/config"),
   nodes: {
     list: async (): Promise<NodeSummary[]> =>
       (await request<NodeListResponse>("/api/v1/nodes")).items,
+    /** Cordon (unschedulable=true) or uncordon (false) a node. */
+    setSchedulable: async (name: string, cordon: boolean): Promise<void> => {
+      await request(`/api/v1/nodes/${encodeURIComponent(name)}/${cordon ? "cordon" : "uncordon"}`, {
+        method: "POST",
+      });
+    },
+    /** Drain a node: cordon, then evict eligible pods via the eviction API. */
+    drain: async (name: string): Promise<DrainResult> =>
+      request<DrainResult>(`/api/v1/nodes/${encodeURIComponent(name)}/drain`, { method: "POST" }),
   },
   contexts: {
     list: async (): Promise<ContextInfo[]> =>
@@ -374,6 +411,35 @@ export const api = {
           `/api/v1/resources/${ref.group}/${ref.version}/${ref.resource}/${encodeURIComponent(ref.name ?? "")}/yaml${nsQuery(ref.namespace)}`,
         )
       ).yaml,
+    /** Apply an edited manifest via the dynamic client (any GVR incl. CRDs). A
+     *  stale resourceVersion surfaces as an ApiError with code "conflict". */
+    apply: async (ref: ResourceRef, yaml: string): Promise<KubeObject> =>
+      (
+        await request<ObjectResponse>(
+          `/api/v1/resources/${ref.group}/${ref.version}/${ref.resource}/${encodeURIComponent(ref.name ?? "")}${nsQuery(ref.namespace)}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ yaml }),
+          },
+        )
+      ).object,
+    /** Delete any object (namespaced or cluster-scoped) via the dynamic client. */
+    delete: async (ref: ResourceRef): Promise<void> => {
+      await request(
+        `/api/v1/resources/${ref.group}/${ref.version}/${ref.resource}/${encodeURIComponent(ref.name ?? "")}${nsQuery(ref.namespace)}`,
+        { method: "DELETE" },
+      );
+    },
+  },
+  secrets: {
+    /** The plaintext of a single Secret key, fetched on explicit reveal. */
+    reveal: async (namespace: string, name: string, key: string): Promise<string> =>
+      (
+        await request<{ key: string; value: string }>(
+          `/api/v1/secrets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/reveal?key=${encodeURIComponent(key)}`,
+        )
+      ).value,
   },
   workloads: {
     /** Typed summary list for one workload kind; T is the matching *Summary. */
@@ -393,6 +459,25 @@ export const api = {
           `/api/v1/workloads/cronjobs/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/jobs`,
         )
       ).items,
+    /** Set the replica count (Deployments/StatefulSets/ReplicaSets) via the
+     *  scale subresource. */
+    scale: async (resource: string, namespace: string, name: string, replicas: number): Promise<void> => {
+      await request(
+        `/api/v1/workloads/${resource}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ replicas }),
+        },
+      );
+    },
+    /** Trigger a rollout-restart (Deployments/StatefulSets/DaemonSets). */
+    restart: async (resource: string, namespace: string, name: string): Promise<void> => {
+      await request(
+        `/api/v1/workloads/${resource}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`,
+        { method: "POST" },
+      );
+    },
   },
   /** Events filtered to a single object by involvedObject kind + name (+ namespace). */
   events: async (ref: { namespace?: string; kind: string; name: string }): Promise<EventSummary[]> => {

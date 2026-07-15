@@ -1,5 +1,5 @@
 import { type ColumnDef } from "@tanstack/react-table";
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { WorkloadTable } from "@/components/workload-table";
@@ -62,11 +62,13 @@ interface ResourceTableProps {
   columns: ResourceColumn[];
   rows: ResourceRow[];
   detailHref: (row: ResourceRow) => string;
+  /** Optional per-row action cell (e.g. a delete control) when writable. */
+  rowAction?: (row: ResourceRow) => ReactNode;
 }
 
 /** The generic-engine list table. Builds server-described column defs, then
  *  delegates sorting and rendering to the shared WorkloadTable. */
-export function ResourceTable({ columns, rows, detailHref }: ResourceTableProps) {
+export function ResourceTable({ columns, rows, detailHref, rowAction }: ResourceTableProps) {
   const columnDefs = useMemo(() => buildColumnDefs(columns, detailHref), [columns, detailHref]);
-  return <WorkloadTable columns={columnDefs} rows={rows} />;
+  return <WorkloadTable columns={columnDefs} rows={rows} rowAction={rowAction} />;
 }

@@ -1,5 +1,6 @@
 import { AlertCircle, RefreshCw } from "lucide-react";
 
+import { NodeActions } from "@/components/node-actions";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useReadOnly } from "@/hooks/use-config";
 import { useNodes } from "@/hooks/use-nodes";
 import { ApiError } from "@/lib/api";
 
@@ -29,6 +31,7 @@ function statusVariant(status: string): "default" | "secondary" | "destructive" 
 
 export function NodesPage() {
   const { data, isPending, isError, error, refetch, isFetching } = useNodes();
+  const readOnly = useReadOnly();
 
   return (
     <Card>
@@ -63,7 +66,9 @@ export function NodesPage() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Schedulable</TableHead>
                 <TableHead>Version</TableHead>
+                {!readOnly && <TableHead className="text-right">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -73,7 +78,19 @@ export function NodesPage() {
                   <TableCell>
                     <Badge variant={statusVariant(node.status)}>{node.status}</Badge>
                   </TableCell>
+                  <TableCell>
+                    {node.unschedulable ? (
+                      <Badge variant="secondary">Cordoned</Badge>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">Schedulable</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">{node.version}</TableCell>
+                  {!readOnly && (
+                    <TableCell>
+                      <NodeActions node={node} />
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>

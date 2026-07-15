@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 
 import { LiveBadge } from "@/components/live-badge";
 import { NamespaceSelector } from "@/components/namespace-selector";
+import { DeleteRowButton } from "@/components/resource-actions";
 import { ResourceTable } from "@/components/resource-table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useReadOnly } from "@/hooks/use-config";
 import { useDiscovery } from "@/hooks/use-discovery";
 import { useNamespaces } from "@/hooks/use-namespaces";
 import { useLiveResourceList } from "@/hooks/use-stream";
@@ -50,6 +52,7 @@ function GenericResourceListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const ns = searchParams.get("ns") ?? "";
 
+  const readOnly = useReadOnly();
   const { data: discovery } = useDiscovery();
   const info = findResource(discovery, { group, version, resource });
   const discoveryNamespaced = info?.namespaced; // undefined until discovery resolves
@@ -90,6 +93,16 @@ function GenericResourceListPage() {
         : `${base}/${encodeURIComponent(row.name)}`;
     },
     [group, version, resource, namespaced],
+  );
+
+  const rowAction = useCallback(
+    (row: ResourceRow) => (
+      <DeleteRowButton
+        refx={{ group, version, resource, namespace: row.namespace, name: row.name }}
+        kind={title}
+      />
+    ),
+    [group, version, resource, title],
   );
 
   return (
@@ -133,7 +146,12 @@ function GenericResourceListPage() {
             No {resource} found{namespaced && ns ? ` in namespace ${ns}` : ""}.
           </p>
         ) : (
-          <ResourceTable columns={list.data.columns} rows={list.data.rows} detailHref={detailHref} />
+          <ResourceTable
+            columns={list.data.columns}
+            rows={list.data.rows}
+            detailHref={detailHref}
+            rowAction={readOnly ? undefined : rowAction}
+          />
         )}
       </CardContent>
     </Card>

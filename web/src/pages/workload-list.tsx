@@ -5,6 +5,7 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { LiveBadge } from "@/components/live-badge";
 import { NamespaceSelector } from "@/components/namespace-selector";
+import { DeleteRowButton } from "@/components/resource-actions";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkloadTable } from "@/components/workload-table";
+import { useReadOnly } from "@/hooks/use-config";
 import { useNamespaces } from "@/hooks/use-namespaces";
 import { useLiveWorkloadSummary } from "@/hooks/use-stream";
 import { formatAge } from "@/lib/age";
@@ -49,6 +51,7 @@ export function WorkloadListPage({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const ns = searchParams.get("ns") ?? "";
+  const readOnly = useReadOnly();
 
   // All seven workload kinds are namespaced; an empty selection lists all.
   const query = useLiveWorkloadSummary<WorkloadSummary>(
@@ -115,7 +118,20 @@ export function WorkloadListPage({
             No {resource} found{ns ? ` in namespace ${ns}` : ""}.
           </p>
         ) : (
-          <WorkloadTable columns={columns} rows={query.data} />
+          <WorkloadTable
+            columns={columns}
+            rows={query.data}
+            rowAction={
+              readOnly
+                ? undefined
+                : (row) => (
+                    <DeleteRowButton
+                      refx={{ group, version, resource, namespace: row.namespace, name: row.name }}
+                      kind={kind}
+                    />
+                  )
+            }
+          />
         )}
       </CardContent>
     </Card>

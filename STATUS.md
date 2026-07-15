@@ -10,10 +10,10 @@
 
 ## Current state
 - Last updated: 2026-07-15
-- Last work: Sprint 4 — Live updates + logs + events [sprint]
-- Summary: The dashboard is now live (ADR-0006 SSE). New `internal/stream`: a Hub owning one shared dynamic informer per (context, GVR), ref-counted and torn down when the last subscriber disconnects; per-subscriber handlers give each stream the informer's initial snapshot as adds, then live add/update/delete. Watch errors raise an explicit `resync`; a slow subscriber's buffer overflow raises a resync rather than blocking; heartbeat comments keep idle streams alive and detect a context switch to close streams bound to the prior context. Events carry the same server-shaped row the REST list/feed returns (`resources.ShapeStreamRow`: typed summaries for the seven workload kinds, an event-feed row for core Events, else the generic metadata row; detail subscribers also get the full object). Routes: `GET /api/v1/stream/resources/{group}/{version}/{resource}?namespace=&name=&detail=`, `GET /api/v1/stream/pods/{ns}/{name}/logs?container=&follow=&previous=&tailLines=`, and `GET /api/v1/events/feed?namespace=&type=` (initial-paint + polling fallback). UI: a reconnecting EventSource client (exponential backoff, live/stale indicator) feeds live-update hooks that patch the TanStack Query cache in place — no full refetch — with polling fallback while a stream is not live; wired into generic + typed workload lists and the generic/pod detail object (deletion of the viewed object surfaced). New Pod "Logs" tab (container select, follow, previous, tail lines; auto-scroll that pauses on scroll-up, resumable; closed-state surfaced). New live Events page (namespace + type filters, deep-links to the involved object) in the sidebar. Manual kind smoke: watched pods while scaling a Deployment (add/update/delete with typed rows), streamed follow + tail logs and validated the closed-event, hit the events feed while force-deleting a pod, tailLines=-5 → 400, zero panics under watch churn. `make test` (race+envtest incl. hub fan-out/ref-counting/namespace-filter/resync + watch-delivery envtest), lint and build all green; fe-test 104. Post-implementation adversarial multi-agent review (9 confirmed findings) applied: fixed a log-reader goroutine leak on client disconnect (ctx-aware send), resync now drains stale buffered events, EventFeedRow made a superset of the generic row (uid+creationTimestamp), detail `deleted` flag resets on object switch + object view gains the poll fallback, log stream clears on reconnect (no dup lines), events racing the initial baseline flush via a deferred refetch; added heartbeat + watch-error-resync tests.
-- Next expected: Sprint 5 — Mutations + guardrails
-- ADRs touched this session: none (implements ADR-0006 SSE watch/log bridge as specified)
+- Last work: Sprint 5 — Mutations + guardrails [sprint]
+- Summary: Write operations shipped, every one behind a confirmation dialog and the ADR-0005 guardrails. Backend: generic apply (`PUT /resources/{g}/{v}/{r}/{name}`) via the dynamic client for any GVK incl. CRDs — body is `{"yaml":...}` so validation is server-side; a stale resourceVersion is surfaced as a 409 (never a silent overwrite), invalid YAML a 400, server validation a 422 (new `writeMutationError` classifies conflict/invalid/already-exists before delegating). Generic delete (`DELETE …`, namespaced or cluster-scoped). Scale via the scale subresource (`POST /workloads/{r}/{ns}/{name}/scale`, Deploy/STS/RS); rollout-restart stamping the `kubectl.kubernetes.io/restartedAt` pod-template annotation (`…/restart`, Deploy/STS/DS). Node cordon/uncordon patch `spec.unschedulable`; drain (`…/drain`) cordons then evicts via the eviction API, skipping DaemonSet/mirror/terminal pods and reporting each pod's outcome (evicted/skipped/blocked/error) — a PDB-blocked eviction (429) is reported, not swallowed. `KUBESCOPE_READ_ONLY=true` enforced by server middleware on a mutation route group: every mutating route returns 403 (a table test enumerates all seven; a direct curl is rejected the same as the UI), while reads and the in-memory context switch stay usable. `GET /api/v1/config` exposes `{readOnly, authMode}` to the FE. Secret data masked by default in get + raw-YAML (`**redacted**`, keys preserved), with per-key reveal via `GET /api/v1/secrets/{ns}/{name}/reveal?key=` (decoded plaintext, never logged). Frontend: CodeMirror 6 YAML editor with an edit/apply flow (confirm dialog, 409 → reload-and-retry banner, inline validation errors); a reusable typed-name confirmation dialog gating every mutation (delete/drain require typing the object/node name); scale/restart controls on controller views, delete from list + detail views, cordon/uncordon + drain (with a per-pod results modal) on the nodes view; a read-only banner + all mutation controls hidden when read-only; masked Secret detail with per-key reveal. Verified: `go test -race ./...` incl. envtest for apply/409-conflict/scale/delete/cordon/drain-eviction(+PDB-blocked)/secret-masking; `fe-test` 119; lint/vet/gofmt/typecheck clean; FE prod build embeds CodeMirror; real-binary curl smoke confirmed read-only 403 on every mutating route and 200 config. Post-implementation review fixed two Secret-exposure findings: (1) the SSE **detail** stream shipped the full object unmasked — a watched Secret leaked its data; added a Hub object-sanitizer (`WithObjectSanitizer` → `resources.MaskStreamObject`, masking a deep copy so the shared informer cache is never mutated) so stream detail matches the masked REST/YAML views; (2) a Secret's YAML tab is now view-only (editing masked data would apply the redaction marker), values change via the reveal flow instead.
+- Next expected: Sprint 6 — Exec terminal + port-forward
+- ADRs touched this session: none (implements ADR-0005 guardrails + ADR-0003 generic apply/delete). Added the CodeMirror 6 frontend deps (`codemirror`, `@codemirror/lang-yaml`, `@codemirror/view`, `@codemirror/state`) — a pre-declared choice in the CLAUDE.md tech stack (YAML editor, Sprint 5), not a new decision.
 
 ## Sprint board
 
@@ -97,21 +97,21 @@
   - [x] Events feed API
   - [x] Events feed UI with namespace filter
 
-### Sprint 5 — Mutations + guardrails — [todo]
+### Sprint 5 — Mutations + guardrails — [done]
 - Story 5.1 — Edit YAML + apply (CodeMirror editor, server-side update, conflict surfacing)
-  - [ ] CodeMirror YAML editor
-  - [ ] Server-side update/apply
-  - [ ] Conflict surfacing
+  - [x] CodeMirror YAML editor
+  - [x] Server-side update/apply
+  - [x] Conflict surfacing
 - Story 5.2 — Scale, rollout-restart, delete — with typed confirmation dialogs
-  - [ ] Scale + rollout-restart endpoints
-  - [ ] Delete with typed confirmation dialogs
+  - [x] Scale + rollout-restart endpoints
+  - [x] Delete with typed confirmation dialogs
 - Story 5.3 — Node cordon/uncordon/drain
-  - [ ] Cordon/uncordon endpoints
-  - [ ] Drain with confirmation
+  - [x] Cordon/uncordon endpoints
+  - [x] Drain with confirmation
 - Story 5.4 — `KUBESCOPE_READ_ONLY` enforcement (server middleware + UI state) + Secret masking
-  - [ ] Server middleware rejecting mutations in read-only mode
-  - [ ] UI read-only state
-  - [ ] Secret masking (reveal-on-click)
+  - [x] Server middleware rejecting mutations in read-only mode
+  - [x] UI read-only state
+  - [x] Secret masking (reveal-on-click)
 
 ### Sprint 6 — Exec terminal + port-forward — [todo]
 - Story 6.1 — WebSocket exec bridge (backend: coder/websocket ⇆ SPDY exec)
@@ -166,4 +166,4 @@
 ## Feedback / Review Tasks
 <!-- Format: - [ ] FB-<n>: <description> (source: <sprint/review>, priority: <hi/med/lo>) -->
 - [x] FB-2: Context switch left the currently-mounted view (e.g. Overview) showing the prior cluster's data until a manual refresh or navigation. `useSwitchContext` removed cluster-scoped queries before the global invalidate, and a removed active query has no observer to refetch. Fixed: invalidate first (refetches mounted views in place), then drop only `type:"inactive"` caches. Regression test added; verified in-browser against two kind clusters. (source: manual testing, priority: hi) [done]
-- [ ] FB-1: `writeEngineError` collapses every non-NotFound/Forbidden apiserver error to `502 cluster_unreachable` (+ADR-0004 guidance); a genuine apiserver 5xx/conflict is then mislabeled. Kept consistent with the existing overview handler for now — revisit the error taxonomy when mutations land (Sprint 5). (source: sprint-2 review, priority: lo)
+- [ ] FB-1: `writeEngineError` collapses every non-NotFound/Forbidden apiserver error to `502 cluster_unreachable` (+ADR-0004 guidance); a genuine apiserver 5xx/conflict is then mislabeled. Sprint 5 addressed this on the write paths — `writeMutationError` classifies Conflict→409, Invalid/BadRequest→422 and AlreadyExists→409 before delegating, so apply/scale/delete/cordon/drain surface those faithfully. The generic *read* engine still routes through `writeEngineError` (reads rarely conflict); revisit only if a read path needs finer 5xx taxonomy. (source: sprint-2 review, priority: lo)

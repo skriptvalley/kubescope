@@ -7,7 +7,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import {
   Table,
@@ -21,15 +21,19 @@ import { cn } from "@/lib/utils";
 
 /** A generic sortable table over typed rows. Kind-specific pages supply the
  *  TanStack column defs; this component owns only sorting and rendering, so the
- *  same table backs every workload list and the owned-pods drill-down. */
+ *  same table backs every workload list and the owned-pods drill-down. An
+ *  optional `rowAction` renders a trailing, right-aligned actions cell per row
+ *  (e.g. a delete control) — omitted entirely when not provided. */
 export function WorkloadTable<T>({
   columns,
   rows,
   initialSort,
+  rowAction,
 }: {
   columns: ColumnDef<T>[];
   rows: T[];
   initialSort?: SortingState;
+  rowAction?: (row: T) => ReactNode;
 }) {
   const [sorting, setSorting] = useState<SortingState>(initialSort ?? []);
 
@@ -64,6 +68,7 @@ export function WorkloadTable<T>({
                 )}
               </TableHead>
             ))}
+            {rowAction && <TableHead className="text-right">Actions</TableHead>}
           </TableRow>
         ))}
       </TableHeader>
@@ -75,6 +80,7 @@ export function WorkloadTable<T>({
                 {flexRender(cell.column.columnDef.cell, cell.getContext())}
               </TableCell>
             ))}
+            {rowAction && <TableCell className="text-right">{rowAction(row.original)}</TableCell>}
           </TableRow>
         ))}
       </TableBody>

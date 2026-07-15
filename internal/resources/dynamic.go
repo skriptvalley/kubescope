@@ -104,6 +104,9 @@ func GetHandler(cluster Cluster, disco *DiscoveryService, logger *slog.Logger) h
 		if done {
 			return
 		}
+		// Secret data is masked by default before it leaves the server (ADR-0005);
+		// per-key plaintext is a separate, explicit reveal.
+		maskIfSecret(gvrFromRequest(r), obj)
 		writeJSON(w, logger, http.StatusOK, objectResponse{Object: obj.Object})
 	}
 }
@@ -117,6 +120,9 @@ func YAMLHandler(cluster Cluster, disco *DiscoveryService, logger *slog.Logger) 
 		if done {
 			return
 		}
+		// Mask Secret data before marshaling: the raw-YAML view of a Secret masks
+		// its values too (ADR-0005).
+		maskIfSecret(gvrFromRequest(r), obj)
 		out, err := yaml.Marshal(obj.Object)
 		if err != nil {
 			logger.Error("marshaling yaml", "error", err)
