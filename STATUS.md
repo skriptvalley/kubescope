@@ -10,10 +10,10 @@
 
 ## Current state
 - Last updated: 2026-07-15
-- Last work: Sprint 3 — Workload deep views [sprint]
-- Summary: Rich typed views for the seven workload kinds alongside the generic engine (ADR-0003 hot-path handlers). Backend `internal/resources`: typed summary lists `/api/v1/workloads/{resource}` (Pods/Deployments/StatefulSets/DaemonSets/ReplicaSets/Jobs/CronJobs) with every field computed in Go — pod ready-count/kubectl-style STATUS/restarts/node, controller replica health + kubectl-parity rollout-status lines, Job completions/duration, CronJob schedule/suspend/last-run; controller drill-down `/workloads/{resource}/{ns}/{name}/pods` (selector + ownerReferences, Deployment resolves through its ReplicaSets) and `/…/jobs` (CronJob→Jobs); events `/api/v1/events?namespace=&kind=&name=` filtered by involvedObject, newest-first. Generic engine untouched (still serves these kinds). UI: ResourceList/ResourceDetail dispatch workload kinds to typed views — kind-specific TanStack columns with status pills, Pod detail (init/app/ephemeral container states, restarts, conditions, placement, owner link), controller detail (replica stats + rollout line + owned-pods table), reusable events panel (Warning distinct, empty state) embedded on every workload detail. Manual kind smoke: deployed web/crasher Deployments + Job + CronJob, verified all seven lists, owned-pods RS-hop, and Warning/BackOff events on the crashing pod. `make test` (race+envtest incl. typed endpoints/owned-pods/event filtering), lint and build all green; fe-test 84.
-- Next expected: Sprint 4 — Live updates + logs + events
-- ADRs touched this session: none (implements ADR-0003 typed hot-path handlers as specified)
+- Last work: Sprint 4 — Live updates + logs + events [sprint]
+- Summary: The dashboard is now live (ADR-0006 SSE). New `internal/stream`: a Hub owning one shared dynamic informer per (context, GVR), ref-counted and torn down when the last subscriber disconnects; per-subscriber handlers give each stream the informer's initial snapshot as adds, then live add/update/delete. Watch errors raise an explicit `resync`; a slow subscriber's buffer overflow raises a resync rather than blocking; heartbeat comments keep idle streams alive and detect a context switch to close streams bound to the prior context. Events carry the same server-shaped row the REST list/feed returns (`resources.ShapeStreamRow`: typed summaries for the seven workload kinds, an event-feed row for core Events, else the generic metadata row; detail subscribers also get the full object). Routes: `GET /api/v1/stream/resources/{group}/{version}/{resource}?namespace=&name=&detail=`, `GET /api/v1/stream/pods/{ns}/{name}/logs?container=&follow=&previous=&tailLines=`, and `GET /api/v1/events/feed?namespace=&type=` (initial-paint + polling fallback). UI: a reconnecting EventSource client (exponential backoff, live/stale indicator) feeds live-update hooks that patch the TanStack Query cache in place — no full refetch — with polling fallback while a stream is not live; wired into generic + typed workload lists and the generic/pod detail object (deletion of the viewed object surfaced). New Pod "Logs" tab (container select, follow, previous, tail lines; auto-scroll that pauses on scroll-up, resumable; closed-state surfaced). New live Events page (namespace + type filters, deep-links to the involved object) in the sidebar. Manual kind smoke: watched pods while scaling a Deployment (add/update/delete with typed rows), streamed follow + tail logs and validated the closed-event, hit the events feed while force-deleting a pod, tailLines=-5 → 400, zero panics under watch churn. `make test` (race+envtest incl. hub fan-out/ref-counting/namespace-filter/resync + watch-delivery envtest), lint and build all green; fe-test 104. Post-implementation adversarial multi-agent review (9 confirmed findings) applied: fixed a log-reader goroutine leak on client disconnect (ctx-aware send), resync now drains stale buffered events, EventFeedRow made a superset of the generic row (uid+creationTimestamp), detail `deleted` flag resets on object switch + object view gains the poll fallback, log stream clears on reconnect (no dup lines), events racing the initial baseline flush via a deferred refetch; added heartbeat + watch-error-resync tests.
+- Next expected: Sprint 5 — Mutations + guardrails
+- ADRs touched this session: none (implements ADR-0006 SSE watch/log bridge as specified)
 
 ## Sprint board
 
@@ -82,20 +82,20 @@
   - [x] Per-object events API
   - [x] Events panel on detail views
 
-### Sprint 4 — Live updates + logs + events — [todo]
+### Sprint 4 — Live updates + logs + events — [done]
 - Story 4.1 — Watch→SSE bridge (informers, per-context fan-out, reconnect handling)
-  - [ ] Informer-backed watch per context
-  - [ ] SSE fan-out endpoint
-  - [ ] Reconnect handling
+  - [x] Informer-backed watch per context
+  - [x] SSE fan-out endpoint
+  - [x] Reconnect handling
 - Story 4.2 — Live-updating lists/details in UI (SSE consumption → TanStack Query cache updates)
-  - [ ] SSE consumption in the frontend
-  - [ ] TanStack Query cache updates from events
+  - [x] SSE consumption in the frontend
+  - [x] TanStack Query cache updates from events
 - Story 4.3 — Pod log streaming (follow, container select, previous, tail lines)
-  - [ ] Log stream endpoint (follow, previous, tail lines)
-  - [ ] Log viewer UI with container select
+  - [x] Log stream endpoint (follow, previous, tail lines)
+  - [x] Log viewer UI with container select
 - Story 4.4 — Events feed (cluster-wide + per-namespace)
-  - [ ] Events feed API
-  - [ ] Events feed UI with namespace filter
+  - [x] Events feed API
+  - [x] Events feed UI with namespace filter
 
 ### Sprint 5 — Mutations + guardrails — [todo]
 - Story 5.1 — Edit YAML + apply (CodeMirror editor, server-side update, conflict surfacing)

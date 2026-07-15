@@ -80,6 +80,30 @@ describe("useLiveResourceList", () => {
     // The list endpoint was hit exactly once — every change was a cache patch.
     expect(listMock).toHaveBeenCalledTimes(1);
   });
+
+  it("refetches instead of dropping an event that races the initial baseline", async () => {
+    const baseline: ResourceList = {
+      group: "core",
+      version: "v1",
+      resource: "pods",
+      kind: "Pod",
+      namespaced: true,
+      columns: [],
+      rows: [{ name: "a", namespace: "default", uid: "a-uid" }],
+    };
+    let resolveFirst: (v: ResourceList) => void = () => {};
+    listMock.mockReturnValueOnce(new Promise<ResourceList>((r) => (resolveFirst = r))).mockResolvedValue(baseline);
+
+    const { result } = renderHook(() => useLiveResourceList(podsRef), { wrapper: wrapper() });
+    // Baseline still pending → an early event must trigger a refetch, not a drop.
+    emit({ type: "add", row: { name: "b", namespace: "default", uid: "b-uid" } });
+    await act(async () => {
+      resolveFirst(baseline);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(listMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.data?.rows).toHaveLength(1));
+  });
 });
 
 describe("useLiveWorkloadSummary", () => {
@@ -123,5 +147,23 @@ describe("useLiveResourceObject", () => {
     expect(result.current.deleted).toBe(false);
     emit({ type: "delete", ref: { name: "web-1", namespace: "default" } });
     await waitFor(() => expect(result.current.deleted).toBe(true));
+  });
+
+  it("resets the deleted flag when the viewed object changes", async () => {
+    getMock.mockResolvedValue({ kind: "Pod", metadata: { name: "web-1" } } as KubeObject);
+    const base = { group: "core", version: "v1", resource: "pods", namespace: "default" };
+
+    const { result, rerender } = renderHook(({ name }) => useLiveResourceObject({ ...base, name }), {
+      wrapper: wrapper(),
+      initialProps: { name: "web-1" },
+    });
+    await waitFor(() => expect(result.current.data).toBeTruthy());
+
+    emit({ type: "delete", ref: { name: "web-1", namespace: "default" } });
+    await waitFor(() => expect(result.current.deleted).toBe(true));
+
+    // Navigating to a different object (same component, new params) clears it.
+    rerender({ name: "web-2" });
+    await waitFor(() => expect(result.current.deleted).toBe(false));
   });
 });

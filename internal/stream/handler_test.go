@@ -123,6 +123,45 @@ func TestStreamHandlerDeliversWatchEvents(t *testing.T) {
 	}, 3*time.Second, 50*time.Millisecond, "stream must close after context switch")
 }
 
+func TestStreamHandlerEmitsHeartbeat(t *testing.T) {
+	client := newFakeClient(t) // no objects → an idle stream that only heartbeats
+	cluster := &switchableCluster{dyn: client, ctx: "ctx-a"}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	hub := NewHub(cluster, nameShaper, logger)
+
+	r := chi.NewRouter()
+	r.Get("/stream/resources/{group}/{version}/{resource}", StreamHandler(hub, logger, WithHeartbeat(40*time.Millisecond)))
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/stream/resources/core/v1/pods", nil)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// Read raw lines (readSSE drops comments) and assert a heartbeat comment
+	// arrives on an idle stream — the AC-4.1 keep-alive.
+	comments := make(chan string, 8)
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		for sc.Scan() {
+			if strings.HasPrefix(sc.Text(), ":") {
+				comments <- sc.Text()
+			}
+		}
+		close(comments)
+	}()
+
+	select {
+	case line := <-comments:
+		assert.Contains(t, line, "ping")
+	case <-time.After(3 * time.Second):
+		t.Fatal("no heartbeat comment received on an idle stream")
+	}
+}
+
 func TestStreamHandlerResyncOnBufferOverflow(t *testing.T) {
 	client := newFakeClient(t)
 	cluster := &switchableCluster{dyn: client, ctx: "ctx-a"}

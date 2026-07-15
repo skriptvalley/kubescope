@@ -113,6 +113,7 @@ func buildPodLogOptions(q url.Values) (*corev1.PodLogOptions, error) {
 // stream end as a `closed` event. An off-goroutine reader lets the main loop
 // stay responsive to client disconnect and heartbeat ticks.
 func runLogSSE(w http.ResponseWriter, r *http.Request, flusher http.Flusher, logger *slog.Logger, body io.Reader, heartbeat time.Duration) {
+	ctx := r.Context()
 	lines := make(chan string, logLineBuffer)
 	readErr := make(chan error, 1)
 	go func() {
@@ -120,10 +121,18 @@ func runLogSSE(w http.ResponseWriter, r *http.Request, flusher http.Flusher, log
 		for {
 			line, err := reader.ReadString('\n')
 			if len(line) > 0 {
-				lines <- strings.TrimRight(line, "\n")
+				// Honor cancellation on the send: once the client disconnects the
+				// main loop stops draining `lines`, and closing the body cannot
+				// wake a goroutine already parked on a channel send — that would
+				// leak the goroutine and the held upstream connection.
+				select {
+				case lines <- strings.TrimRight(line, "\n"):
+				case <-ctx.Done():
+					return
+				}
 			}
 			if err != nil {
-				readErr <- err
+				readErr <- err // buffered(1), single send — never blocks
 				close(lines)
 				return
 			}
@@ -132,7 +141,6 @@ func runLogSSE(w http.ResponseWriter, r *http.Request, flusher http.Flusher, log
 
 	ticker := time.NewTicker(heartbeat)
 	defer ticker.Stop()
-	ctx := r.Context()
 
 	for {
 		select {

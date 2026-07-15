@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -91,6 +91,45 @@ function removeByRef<T extends Identifiable>(rows: T[], ref?: WatchEvent["ref"])
   return rows.filter((r) => rowKey(r.namespace, r.name) !== key);
 }
 
+/** Applies a watch event to a cached collection in place. When the baseline is
+ *  not yet populated (an event raced the initial fetch), the event cannot be
+ *  patched, so it flags `missed`; useFlushMissedEvents then invalidates once the
+ *  baseline lands — capturing it instead of silently dropping it until resync.
+ *  Invalidating here would be a no-op: it dedupes into the in-flight fetch,
+ *  whose older snapshot need not contain the raced object. */
+function patchCollection<C>(
+  queryClient: QueryClient,
+  key: QueryKey,
+  missed: { current: boolean },
+  apply: (prev: C) => C,
+): void {
+  if (queryClient.getQueryData<C>(key) === undefined) {
+    missed.current = true;
+    return;
+  }
+  queryClient.setQueryData<C>(key, (prev) => (prev === undefined ? prev : apply(prev)));
+}
+
+/** Once the baseline query has loaded, refetch it if any event was dropped while
+ *  it was in flight — a fresh fetch (not deduped into the initial one) captures
+ *  the raced object. Fires at most once per missed burst. */
+function useFlushMissedEvents(
+  queryClient: QueryClient,
+  key: QueryKey,
+  ready: boolean,
+  missed: { current: boolean },
+): void {
+  const keyStr = JSON.stringify(key);
+  useEffect(() => {
+    if (ready && missed.current) {
+      missed.current = false;
+      void queryClient.invalidateQueries({ queryKey: key });
+    }
+    // key is captured via its stable string form; queryClient/missed are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, keyStr]);
+}
+
 // --- Live list / detail / feed hooks -----------------------------------------
 
 /** A generic resource list that live-patches rows from the SSE watch stream —
@@ -100,17 +139,18 @@ export function useLiveResourceList(ref: ResourceRef) {
   const queryClient = useQueryClient();
   const key = queryKeys.resourceList(ref);
   const gvr: StreamGVR = { group: ref.group, version: ref.version, resource: ref.resource };
+  const missed = useRef(false);
 
   const status = useWatchStream(
     gvr,
     { namespace: ref.namespace },
     {
       onEvent: (event) =>
-        queryClient.setQueryData<ResourceList>(key, (prev) => {
-          if (!prev) return prev;
-          if (event.type === "delete") return { ...prev, rows: removeByRef(prev.rows, event.ref) };
-          return { ...prev, rows: upsert(prev.rows, event.row as ResourceRow) };
-        }),
+        patchCollection<ResourceList>(queryClient, key, missed, (prev) =>
+          event.type === "delete"
+            ? { ...prev, rows: removeByRef(prev.rows, event.ref) }
+            : { ...prev, rows: upsert(prev.rows, event.row as ResourceRow) },
+        ),
       onResync: () => void queryClient.invalidateQueries({ queryKey: key }),
     },
   );
@@ -120,6 +160,7 @@ export function useLiveResourceList(ref: ResourceRef) {
     queryFn: () => api.resources.list(ref),
     refetchInterval: pollFor(status),
   });
+  useFlushMissedEvents(queryClient, key, query.isSuccess, missed);
   return { ...query, streamStatus: status };
 }
 
@@ -132,17 +173,16 @@ export function useLiveWorkloadSummary<T extends WorkloadSummary>(
 ) {
   const queryClient = useQueryClient();
   const key = queryKeys.workloadSummary(resource, namespace);
+  const missed = useRef(false);
 
   const status = useWatchStream(
     gvr,
     { namespace },
     {
       onEvent: (event) =>
-        queryClient.setQueryData<T[]>(key, (prev) => {
-          if (!prev) return prev;
-          if (event.type === "delete") return removeByRef(prev, event.ref);
-          return upsert(prev, event.row as T);
-        }),
+        patchCollection<T[]>(queryClient, key, missed, (prev) =>
+          event.type === "delete" ? removeByRef(prev, event.ref) : upsert(prev, event.row as T),
+        ),
       onResync: () => void queryClient.invalidateQueries({ queryKey: key }),
     },
   );
@@ -152,6 +192,7 @@ export function useLiveWorkloadSummary<T extends WorkloadSummary>(
     queryFn: () => api.workloads.list<T>(resource, namespace),
     refetchInterval: pollFor(status),
   });
+  useFlushMissedEvents(queryClient, key, query.isSuccess, missed);
   return { ...query, streamStatus: status };
 }
 
@@ -164,6 +205,12 @@ export function useLiveResourceObject(ref: ResourceRef, enabled = true) {
   const key = queryKeys.resourceObject(ref);
   const gvr: StreamGVR = { group: ref.group, version: ref.version, resource: ref.resource };
   const [deleted, setDeleted] = useState(false);
+
+  // The detail route reuses this component across objects (only params change),
+  // so clear a prior object's deleted flag when the viewed object changes.
+  useEffect(() => {
+    setDeleted(false);
+  }, [ref.namespace, ref.name]);
 
   const status = useWatchStream(
     gvr,
@@ -185,6 +232,9 @@ export function useLiveResourceObject(ref: ResourceRef, enabled = true) {
     queryKey: key,
     queryFn: () => api.resources.get(ref),
     enabled,
+    // Poll fallback while the stream is not live (AC 4.2), but not after the
+    // object is gone — there is nothing to poll for.
+    refetchInterval: deleted ? false : pollFor(status),
   });
   return { ...query, streamStatus: status, deleted };
 }
@@ -196,17 +246,18 @@ export function useEventsFeed(namespace?: string) {
   const queryClient = useQueryClient();
   const key = queryKeys.eventsFeed(namespace);
   const gvr: StreamGVR = { group: "core", version: "v1", resource: "events" };
+  const missed = useRef(false);
 
   const status = useWatchStream(
     gvr,
     { namespace },
     {
       onEvent: (event) =>
-        queryClient.setQueryData<EventFeedRow[]>(key, (prev) => {
-          if (!prev) return prev;
-          if (event.type === "delete") return removeByRef(prev, event.ref);
-          return sortByLastSeen(upsert(prev, event.row as EventFeedRow));
-        }),
+        patchCollection<EventFeedRow[]>(queryClient, key, missed, (prev) =>
+          event.type === "delete"
+            ? removeByRef(prev, event.ref)
+            : sortByLastSeen(upsert(prev, event.row as EventFeedRow)),
+        ),
       onResync: () => void queryClient.invalidateQueries({ queryKey: key }),
     },
   );
@@ -216,6 +267,7 @@ export function useEventsFeed(namespace?: string) {
     queryFn: () => api.eventsFeed(namespace),
     refetchInterval: pollFor(status),
   });
+  useFlushMissedEvents(queryClient, key, query.isSuccess, missed);
   return { ...query, streamStatus: status };
 }
 

@@ -235,10 +235,14 @@ export interface InvolvedObjectRef {
 }
 
 /** One row of the cluster-wide/per-namespace events feed (Sprint 4). Name and
- *  namespace identify the Event object itself (rows key off them). */
+ *  namespace identify the Event object itself (rows key off them). uid and
+ *  creationTimestamp make it a superset of the generic ResourceRow so the same
+ *  streamed row renders correctly if events are browsed via the generic list. */
 export interface EventFeedRow {
   name: string;
   namespace?: string;
+  uid?: string;
+  creationTimestamp?: string;
   type: string; // Normal | Warning
   reason: string;
   message: string;

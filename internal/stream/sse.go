@@ -85,9 +85,12 @@ func runSSE(w http.ResponseWriter, r *http.Request, flusher http.Flusher, logger
 	ctx := r.Context()
 
 	for {
-		// A pending resync supersedes buffered events: tell the client to
-		// refetch a clean baseline before it applies anything further.
+		// A pending resync supersedes buffered events: the client will refetch a
+		// clean baseline, so any events still queued (older than the ones dropped
+		// on overflow) are stale and must be discarded, not applied over the
+		// fresh baseline.
 		if sub.TakeResync() {
+			drainEvents(sub)
 			if !writeEvent(w, flusher, logger, Event{Type: EventResync}) {
 				return
 			}
@@ -108,6 +111,19 @@ func runSSE(w http.ResponseWriter, r *http.Request, flusher http.Flusher, logger
 			if !writeEvent(w, flusher, logger, ev) {
 				return
 			}
+		}
+	}
+}
+
+// drainEvents non-blockingly discards every event currently queued for the
+// subscriber. Called after a resync so known-stale backlog is never applied
+// over the clean baseline the client is about to refetch.
+func drainEvents(sub *Subscription) {
+	for {
+		select {
+		case <-sub.Events():
+		default:
+			return
 		}
 	}
 }

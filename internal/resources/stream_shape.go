@@ -42,15 +42,22 @@ type InvolvedObjectRef struct {
 // EventFeedRow is one shaped row for the cluster-wide/per-namespace events feed
 // (Story 4.4). Name/Namespace identify the Event object itself (the stream keys
 // rows by them); InvolvedObject is the resource the event concerns.
+//
+// UID and CreationTimestamp make the row a superset of the generic list row, so
+// when core/v1/events is browsed through the generic engine (which paints from
+// the listRow shape) the live-streamed rows still render an age and key exactly
+// like the REST list's rows.
 type EventFeedRow struct {
-	Name           string            `json:"name"`
-	Namespace      string            `json:"namespace,omitempty"`
-	Type           string            `json:"type"` // Normal | Warning
-	Reason         string            `json:"reason"`
-	Message        string            `json:"message"`
-	Count          int32             `json:"count"`
-	LastSeen       string            `json:"lastSeen,omitempty"`
-	InvolvedObject InvolvedObjectRef `json:"involvedObject"`
+	Name              string            `json:"name"`
+	Namespace         string            `json:"namespace,omitempty"`
+	UID               string            `json:"uid,omitempty"`
+	CreationTimestamp string            `json:"creationTimestamp,omitempty"`
+	Type              string            `json:"type"` // Normal | Warning
+	Reason            string            `json:"reason"`
+	Message           string            `json:"message"`
+	Count             int32             `json:"count"`
+	LastSeen          string            `json:"lastSeen,omitempty"`
+	InvolvedObject    InvolvedObjectRef `json:"involvedObject"`
 }
 
 // ShapeStreamRow shapes a live object from the watch bridge into the row its
@@ -130,13 +137,15 @@ func genericStreamRow(u *unstructured.Unstructured) listRow {
 // last-seen/count resolution so a series event reads the same as elsewhere.
 func shapeEventFeedRow(e *corev1.Event) EventFeedRow {
 	return EventFeedRow{
-		Name:      e.Name,
-		Namespace: e.Namespace,
-		Type:      e.Type,
-		Reason:    e.Reason,
-		Message:   e.Message,
-		Count:     eventCount(e),
-		LastSeen:  formatTimestamp(eventLastSeen(e)),
+		Name:              e.Name,
+		Namespace:         e.Namespace,
+		UID:               string(e.UID),
+		CreationTimestamp: formatTimestamp(e.CreationTimestamp),
+		Type:              e.Type,
+		Reason:            e.Reason,
+		Message:           e.Message,
+		Count:             eventCount(e),
+		LastSeen:          formatTimestamp(eventLastSeen(e)),
 		InvolvedObject: InvolvedObjectRef{
 			Kind:      e.InvolvedObject.Kind,
 			Namespace: e.InvolvedObject.Namespace,

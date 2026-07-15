@@ -34,6 +34,11 @@ export function usePodLogs(namespace: string, name: string, params: PodLogParams
       onStatus: (next) => {
         if (!stopped) setStatus(next);
       },
+      // On reconnect the server replays from the start (or tail); clear so the
+      // replayed lines don't duplicate what we already showed.
+      onReconnect: () => {
+        if (!stopped) setLines([]);
+      },
       onMessage: (data) => {
         if (stopped) return;
         let line: string | undefined;
