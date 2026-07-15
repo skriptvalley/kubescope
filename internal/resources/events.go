@@ -64,6 +64,56 @@ func EventsHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 	}
 }
 
+// EventsFeedHandler serves GET /api/v1/events/feed?namespace=&type=: the
+// cluster-wide (or per-namespace) events feed backing the Story 4.4 events
+// page, newest-first, optionally filtered to a single type (Normal|Warning).
+// It is the initial-paint + polling-fallback complement to the live watch→SSE
+// stream, which delivers the same EventFeedRow shape.
+func EventsFeedHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		namespace := q.Get("namespace")
+		typeFilter := q.Get("type")
+		if typeFilter != "" && typeFilter != corev1.EventTypeNormal && typeFilter != corev1.EventTypeWarning {
+			writeError(w, logger, http.StatusBadRequest, "invalid_request",
+				"type must be Normal or Warning when set")
+			return
+		}
+
+		clientset, err := cluster.Clientset()
+		if err != nil {
+			writeKubeconfigUnavailable(w, logger, err)
+			return
+		}
+
+		list, err := clientset.CoreV1().Events(namespace).List(r.Context(), metav1.ListOptions{})
+		if err != nil {
+			writeUnreachable(w, logger, "listing events", err, execGuidanceFor(cluster))
+			return
+		}
+
+		writeJSON(w, logger, http.StatusOK, workloadList[EventFeedRow]{Items: shapeEventFeed(list.Items, typeFilter)})
+	}
+}
+
+// shapeEventFeed shapes core events into feed rows newest-first, dropping rows
+// whose type does not match a non-empty type filter.
+func shapeEventFeed(events []corev1.Event, typeFilter string) []EventFeedRow {
+	sorted := make([]corev1.Event, len(events))
+	copy(sorted, events)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return eventLastSeen(&sorted[i]).Time.After(eventLastSeen(&sorted[j]).Time)
+	})
+	items := make([]EventFeedRow, 0, len(sorted))
+	for i := range sorted {
+		if typeFilter != "" && sorted[i].Type != typeFilter {
+			continue
+		}
+		items = append(items, shapeEventFeedRow(&sorted[i]))
+	}
+	return items
+}
+
 // shapeEvents converts core events to shaped rows sorted newest-first by their
 // last occurrence.
 func shapeEvents(events []corev1.Event) []EventSummary {

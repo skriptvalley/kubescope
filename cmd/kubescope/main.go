@@ -33,9 +33,11 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
+	mgr := kube.NewManager(cfg.KubeconfigPath)
 	handler := server.New(server.Options{
 		Logger: logger,
-		Kube:   kube.NewManager(cfg.KubeconfigPath),
+		Kube:   mgr,
+		Stream: mgr,
 		Dist:   web.Dist(),
 	})
 

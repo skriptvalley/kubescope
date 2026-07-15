@@ -13,7 +13,16 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/skriptvalley/kubescope/internal/resources"
+	"github.com/skriptvalley/kubescope/internal/stream"
 )
+
+// StreamCluster is the context/client surface the streaming handlers need:
+// per-context dynamic client (watch bridge) and typed clientset (pod logs).
+// *kube.Manager satisfies it (ADR-0006).
+type StreamCluster interface {
+	stream.Cluster
+	stream.LogCluster
+}
 
 // Options carries the dependencies the router needs; all injected, no
 // globals.
@@ -22,6 +31,9 @@ type Options struct {
 	// Kube enumerates/switches contexts and provides clientsets for API
 	// handlers (a superset of resources.ClientsetProvider).
 	Kube resources.Cluster
+	// Stream backs the watch→SSE and pod-log endpoints (ADR-0006). When nil,
+	// the streaming routes are not registered (used by router-only tests).
+	Stream StreamCluster
 	// Dist is the built SPA (index.html at its root).
 	Dist fs.FS
 }
@@ -69,6 +81,19 @@ func New(opts Options) http.Handler {
 			v1.Get("/workloads/{resource}/{namespace}/{name}/pods", resources.OwnedPodsHandler(opts.Kube, opts.Logger))
 			v1.Get("/workloads/{resource}/{namespace}/{name}/jobs", resources.OwnedJobsHandler(opts.Kube, opts.Logger))
 			v1.Get("/events", resources.EventsHandler(opts.Kube, opts.Logger))
+			// Cluster-wide/per-namespace events feed (Sprint 4): initial-paint +
+			// polling-fallback complement to the live events stream below.
+			v1.Get("/events/feed", resources.EventsFeedHandler(opts.Kube, opts.Logger))
+
+			// Live updates (Sprint 4, ADR-0006): a shared informer per
+			// context+GVR fans watch events out over SSE, and pod logs follow
+			// over the same transport. Registered only when a stream backend is
+			// wired (production always is; router-only tests skip it).
+			if opts.Stream != nil {
+				hub := stream.NewHub(opts.Stream, resources.ShapeStreamRow, opts.Logger)
+				v1.Get("/stream/resources/{group}/{version}/{resource}", stream.StreamHandler(hub, opts.Logger))
+				v1.Get("/stream/pods/{namespace}/{name}/logs", stream.LogsHandler(opts.Stream, opts.Logger))
+			}
 		})
 	})
 
