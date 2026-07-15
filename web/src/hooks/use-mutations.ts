@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { api, type ResourceRef } from "@/lib/api";
+import { api, type ResourceRef, type StartPortForwardParams } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 
 // Mutation hooks (Sprint 5). Each wraps a single write call and invalidates the
@@ -73,5 +73,24 @@ export function useDrainNode() {
   return useMutation({
     mutationFn: (name: string) => api.nodes.drain(name),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["nodes"] }),
+  });
+}
+
+/** Start a port-forward (Story 6.3); the active-forwards list refetches so the
+ *  new forward appears. Starting is gated by read-only mode server-side. */
+export function useStartPortForward() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: StartPortForwardParams) => api.portForwards.start(params),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.portForwards() }),
+  });
+}
+
+/** Stop a port-forward by id; the list refetches so the row disappears. */
+export function useStopPortForward() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.portForwards.stop(id),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.portForwards() }),
   });
 }

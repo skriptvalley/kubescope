@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/skriptvalley/kubescope/internal/stream"
 )
 
 // mutatingRoutes enumerates every mutating API route. This list is the read-only
@@ -33,14 +35,25 @@ var mutatingRoutes = []struct {
 	{"cordon", http.MethodPost, "/api/v1/nodes/node-1/cordon", ""},
 	{"uncordon", http.MethodPost, "/api/v1/nodes/node-1/uncordon", ""},
 	{"drain", http.MethodPost, "/api/v1/nodes/node-1/drain", ""},
+	// Sprint 6: exec (a WebSocket upgrade, guarded before it upgrades) and
+	// starting a port-forward. The port-forward body deliberately omits `pod` so
+	// that in writable mode the handler fails validation (400) *before* any
+	// cluster dial — proving the guard passes through without a live cluster.
+	{"exec", http.MethodGet, "/api/v1/stream/pods/default/nginx/exec?container=web", ""},
+	{"port-forward-start", http.MethodPost, "/api/v1/portforwards", `{"namespace":"default","remotePort":80}`},
 }
 
 func readOnlyServer(readOnly bool) http.Handler {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	provider := &fakeProvider{clientset: fake.NewClientset()}
 	return New(Options{
-		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Kube:     &fakeProvider{clientset: fake.NewClientset()},
-		ReadOnly: readOnly,
-		Dist:     fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("spa")}},
+		Logger:       logger,
+		Kube:         provider,
+		Exec:         provider,
+		ExecSessions: stream.NewExecRegistry(),
+		PortForwards: stream.NewPortForwardManager(provider, logger),
+		ReadOnly:     readOnly,
+		Dist:         fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("spa")}},
 	})
 }
 

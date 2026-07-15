@@ -360,6 +360,29 @@ export interface DrainResult {
   failed: number;
 }
 
+/** One active backend-managed port-forward (Sprint 6). */
+export interface PortForward {
+  id: string;
+  context: string;
+  namespace: string;
+  pod: string;
+  localPort: number;
+  remotePort: number;
+  startedAt: string;
+}
+
+interface PortForwardListResponse {
+  items: PortForward[];
+}
+
+/** Parameters for starting a port-forward: 0 localPort auto-assigns. */
+export interface StartPortForwardParams {
+  namespace: string;
+  pod: string;
+  remotePort: number;
+  localPort?: number;
+}
+
 export const api = {
   config: async (): Promise<ServerConfig> => request<ServerConfig>("/api/v1/config"),
   nodes: {
@@ -489,6 +512,23 @@ export const api = {
    *  fallback for the live events page. */
   eventsFeed: async (namespace?: string): Promise<EventFeedRow[]> =>
     (await request<WorkloadListResponse<EventFeedRow>>(`/api/v1/events/feed${nsQuery(namespace)}`)).items,
+  /** Backend-managed pod port-forwards (Sprint 6): start, list, stop. */
+  portForwards: {
+    list: async (): Promise<PortForward[]> =>
+      (await request<PortForwardListResponse>("/api/v1/portforwards")).items,
+    /** Start a forward (pod port → backend loopback listener). Starting is a
+     *  mutating control, so it is rejected in read-only mode server-side. */
+    start: async (params: StartPortForwardParams): Promise<PortForward> =>
+      request<PortForward>("/api/v1/portforwards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+      }),
+    /** Stop a forward by id (idempotent from the UI's perspective). */
+    stop: async (id: string): Promise<void> => {
+      await request(`/api/v1/portforwards/${encodeURIComponent(id)}`, { method: "DELETE" });
+    },
+  },
 };
 
 // --- Live streaming (SSE) URLs -----------------------------------------------
@@ -538,6 +578,25 @@ export function podLogsUrl(namespace: string, name: string, params: PodLogParams
   if (params.tailLines !== undefined) q.set("tailLines", String(params.tailLines));
   const query = q.toString();
   return `/api/v1/stream/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/logs${query ? `?${query}` : ""}`;
+}
+
+// --- Exec terminal (WebSocket) URL --------------------------------------------
+// The exec endpoint is a WebSocket, not SSE/fetch, so the API module only builds
+// its (relative) URL; lib/exec-socket upgrades it to a ws(s):// connection.
+
+/** Exec target parameters (Story 6.1): container and command (default shell). */
+export interface PodExecParams {
+  container?: string;
+  command?: string[];
+}
+
+/** Builds the exec WebSocket URL for a pod/container (relative path). */
+export function podExecUrl(namespace: string, name: string, params: PodExecParams = {}): string {
+  const q = new URLSearchParams();
+  if (params.container) q.set("container", params.container);
+  for (const c of params.command ?? []) q.append("command", c);
+  const query = q.toString();
+  return `/api/v1/stream/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/exec${query ? `?${query}` : ""}`;
 }
 
 /** Builds the `?namespace=` query, or "" when no namespace is given. */

@@ -1,6 +1,7 @@
 import { Lock } from "lucide-react";
 import { Outlet } from "react-router-dom";
 
+import { ActiveForwardsPanel } from "@/components/active-forwards-panel";
 import { ContextSwitcher } from "@/components/context-switcher";
 import { Sidebar } from "@/components/sidebar";
 import { useServerConfig } from "@/hooks/use-config";
@@ -23,6 +24,7 @@ export function Layout() {
           <Outlet />
         </main>
       </div>
+      <ActiveForwardsPanel />
     </div>
   );
 }

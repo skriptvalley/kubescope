@@ -34,6 +34,16 @@ type Options struct {
 	// Stream backs the watch→SSE and pod-log endpoints (ADR-0006). When nil,
 	// the streaming routes are not registered (used by router-only tests).
 	Stream StreamCluster
+	// Exec is the cluster surface for the exec WebSocket bridge (Sprint 6):
+	// clientset + rest.Config per context. When nil (or ExecSessions is nil) the
+	// exec route is not registered. *kube.Manager satisfies it.
+	Exec stream.ExecCluster
+	// ExecSessions tracks live exec sessions so a context switch or shutdown can
+	// tear them down; shared with main so shutdown can close them all.
+	ExecSessions *stream.ExecRegistry
+	// PortForwards backs the port-forward start/stop/list API (Sprint 6). When
+	// nil those routes are not registered. Shared with main for shutdown teardown.
+	PortForwards *stream.PortForwardManager
 	// ReadOnly rejects every mutating route with a 403 via server-side
 	// middleware — the bypass-proof guardrail from ADR-0005. The UI reads the
 	// same flag from /api/v1/config to disable controls, but this is the control.
@@ -99,6 +109,15 @@ func New(opts Options) http.Handler {
 			// gated by read-only mode.
 			v1.Get("/secrets/{namespace}/{name}/reveal", resources.RevealSecretHandler(opts.Kube, opts.Logger))
 
+			// Port-forward list + stop (Sprint 6). Both manage backend-local
+			// session state — a loopback listener the user already started — not
+			// cluster state, so they stay usable in read-only mode; only starting a
+			// forward is gated (in the mutation group below).
+			if opts.PortForwards != nil {
+				v1.Get("/portforwards", opts.PortForwards.ListHandler())
+				v1.Delete("/portforwards/{id}", opts.PortForwards.DeleteHandler())
+			}
+
 			// Mutating routes (Sprint 5). Registered behind read-only middleware so
 			// KUBESCOPE_READ_ONLY=true returns 403 for every one of them, server-
 			// side and bypass-proof — a direct API call is rejected the same as the
@@ -113,6 +132,16 @@ func New(opts Options) http.Handler {
 				m.Post("/nodes/{name}/cordon", resources.CordonHandler(opts.Kube, opts.Logger))
 				m.Post("/nodes/{name}/uncordon", resources.UncordonHandler(opts.Kube, opts.Logger))
 				m.Post("/nodes/{name}/drain", resources.DrainHandler(opts.Kube, opts.Logger))
+				// Exec runs arbitrary in-pod commands and starting a port-forward
+				// opens a tunnel to a workload — both mutating capabilities, so
+				// read-only mode 403s them here. Exec is a WebSocket upgrade
+				// (ADR-0006); the guard rejects the request before it upgrades.
+				if opts.Exec != nil && opts.ExecSessions != nil {
+					m.Get("/stream/pods/{namespace}/{name}/exec", stream.ExecHandler(opts.Exec, opts.ExecSessions, opts.Logger))
+				}
+				if opts.PortForwards != nil {
+					m.Post("/portforwards", opts.PortForwards.CreateHandler())
+				}
 			})
 
 			// Live updates (Sprint 4, ADR-0006): a shared informer per

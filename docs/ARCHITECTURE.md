@@ -77,6 +77,23 @@ sequenceDiagram
   Note over X,A: either side closing tears down both legs
 ```
 
+**Exec WebSocket wire protocol** (Sprint 6, `internal/stream/exec.go` ⇄ `web/src/lib/exec-socket.ts`). The route `GET /api/v1/stream/pods/{namespace}/{name}/exec?container=&command=` upgrades to a WebSocket carrying two frame kinds:
+
+- **Binary frames** — raw terminal bytes. Client→server is stdin (keystrokes, pastes); server→client is stdout/stderr merged (TTY mode collapses them into one stream). stdin must be binary; a text frame is read as a control message.
+- **Text frames** — a JSON control message. Client→server sends `{"type":"resize","cols":C,"rows":R}` on a terminal resize. Server→client sends exactly one terminal frame just before it closes the socket: `{"type":"exit","code":N}` when the remote process exits (N is its exit code), or `{"type":"error","message":"…"}` for a failure (pod gone, bad container, RBAC denied, transport error). The close status code mirrors the intent (normal closure on exit, internal error on failure); the control frame is the authoritative, untruncated payload.
+
+Teardown: a client disconnect cancels the SPDY session (no leaked goroutines); the remote process exiting closes the WebSocket with the structured reason above; a context switch or server shutdown tears every session down. `KUBESCOPE_READ_ONLY=true` rejects the upgrade with a 403 before it upgrades (the route lives in the read-only mutation group).
+
+### 4. Port-forward a pod (backend-managed sessions)
+
+Port-forwards are control operations, not streams, so they are a plain HTTP API over a per-context registry (`internal/stream/portforward.go`):
+
+- `POST /api/v1/portforwards` `{namespace, pod, remotePort, localPort?}` — establishes a client-go SPDY port-forward and binds a **loopback** (`127.0.0.1`) listener; `localPort` 0 auto-assigns. Returns the active forward (with the bound local port). Gated by read-only mode.
+- `GET /api/v1/portforwards` — lists active forwards (pod, ports, context, `startedAt`).
+- `DELETE /api/v1/portforwards/{id}` — stops a forward (idempotent); the listener closes immediately.
+
+A forward that dies on its own (pod deleted mid-forward) is dropped from the registry by a watcher. Forwards bind loopback only; reaching a forwarded port from the container host requires publishing it (`docker run -p`). Like exec sessions, forwards are per-context and torn down on a context switch or server shutdown.
+
 ## Deployment model
 
 Single container, single process ([adr/0002](adr/0002-single-binary-embedded-spa.md)):
