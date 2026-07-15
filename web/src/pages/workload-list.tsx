@@ -3,6 +3,7 @@ import { AlertCircle, RefreshCw } from "lucide-react";
 import { useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { LiveBadge } from "@/components/live-badge";
 import { NamespaceSelector } from "@/components/namespace-selector";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -17,7 +18,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkloadTable } from "@/components/workload-table";
 import { useNamespaces } from "@/hooks/use-namespaces";
-import { useWorkloadSummary } from "@/hooks/use-workloads";
+import { useLiveWorkloadSummary } from "@/hooks/use-stream";
 import { formatAge } from "@/lib/age";
 import {
   ApiError,
@@ -50,7 +51,11 @@ export function WorkloadListPage({
   const ns = searchParams.get("ns") ?? "";
 
   // All seven workload kinds are namespaced; an empty selection lists all.
-  const query = useWorkloadSummary<WorkloadSummary>(resource, ns || undefined);
+  const query = useLiveWorkloadSummary<WorkloadSummary>(
+    resource,
+    { group, version, resource },
+    ns || undefined,
+  );
   const namespaces = useNamespaces();
 
   const setNamespace = useCallback(
@@ -81,6 +86,7 @@ export function WorkloadListPage({
           </CardDescription>
         </div>
         <div className="flex items-center gap-3">
+          <LiveBadge status={query.streamStatus} />
           <NamespaceSelector
             value={ns}
             onChange={setNamespace}

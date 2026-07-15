@@ -2,6 +2,7 @@ import { AlertCircle, RefreshCw } from "lucide-react";
 import { useCallback } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
+import { LiveBadge } from "@/components/live-badge";
 import { NamespaceSelector } from "@/components/namespace-selector";
 import { ResourceTable } from "@/components/resource-table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -16,7 +17,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDiscovery } from "@/hooks/use-discovery";
 import { useNamespaces } from "@/hooks/use-namespaces";
-import { useResourceList } from "@/hooks/use-resource";
+import { useLiveResourceList } from "@/hooks/use-stream";
 import { ApiError, type ResourceRow } from "@/lib/api";
 import { findResource } from "@/lib/discovery-nav";
 import { workloadKind } from "@/lib/workloads";
@@ -59,7 +60,7 @@ function GenericResourceListPage() {
   // right namespace on the FIRST request instead of briefly listing all
   // namespaces while discovery loads; cluster-scoped lists still never send one.
   const effectiveNamespace = discoveryNamespaced === false ? undefined : ns || undefined;
-  const list = useResourceList({ group, version, resource, namespace: effectiveNamespace });
+  const list = useLiveResourceList({ group, version, resource, namespace: effectiveNamespace });
   const namespaces = useNamespaces();
 
   // The list response's `namespaced` is authoritative and same-response; prefer
@@ -101,6 +102,7 @@ function GenericResourceListPage() {
           </CardDescription>
         </div>
         <div className="flex items-center gap-3">
+          <LiveBadge status={list.streamStatus} />
           {namespaced && (
             <NamespaceSelector
               value={ns}

@@ -227,6 +227,30 @@ export interface EventSummary {
   lastSeen?: string;
 }
 
+/** The object an event concerns; the feed deep-links to it when it exists. */
+export interface InvolvedObjectRef {
+  kind: string;
+  namespace?: string;
+  name: string;
+}
+
+/** One row of the cluster-wide/per-namespace events feed (Sprint 4). Name and
+ *  namespace identify the Event object itself (rows key off them). uid and
+ *  creationTimestamp make it a superset of the generic ResourceRow so the same
+ *  streamed row renders correctly if events are browsed via the generic list. */
+export interface EventFeedRow {
+  name: string;
+  namespace?: string;
+  uid?: string;
+  creationTimestamp?: string;
+  type: string; // Normal | Warning
+  reason: string;
+  message: string;
+  count: number;
+  lastSeen?: string;
+  involvedObject: InvolvedObjectRef;
+}
+
 interface WorkloadListResponse<T> {
   items: T[];
 }
@@ -376,7 +400,60 @@ export const api = {
     if (ref.namespace) params.set("namespace", ref.namespace);
     return (await request<WorkloadListResponse<EventSummary>>(`/api/v1/events?${params.toString()}`)).items;
   },
+  /** Cluster-wide (or per-namespace) events feed — initial paint + polling
+   *  fallback for the live events page. */
+  eventsFeed: async (namespace?: string): Promise<EventFeedRow[]> =>
+    (await request<WorkloadListResponse<EventFeedRow>>(`/api/v1/events/feed${nsQuery(namespace)}`)).items,
 };
+
+// --- Live streaming (SSE) URLs -----------------------------------------------
+// The stream endpoints are consumed by EventSource, not fetch, so the API
+// module only builds their URLs. `group` is the URL token already ("core" for
+// the core group), matching the route params the pages hold.
+
+/** Identifies a resource collection to watch. */
+export interface StreamGVR {
+  group: string; // URL token ("core" for the core group)
+  version: string;
+  resource: string;
+}
+
+/** Narrows a watch stream: a namespace and/or a single object, and whether to
+ *  include the full object body (detail views need it; lists do not). */
+export interface StreamFilter {
+  namespace?: string;
+  name?: string;
+  detail?: boolean;
+}
+
+/** Builds the SSE URL for a resource watch stream. */
+export function streamResourceUrl(gvr: StreamGVR, filter: StreamFilter = {}): string {
+  const params = new URLSearchParams();
+  if (filter.namespace) params.set("namespace", filter.namespace);
+  if (filter.name) params.set("name", filter.name);
+  if (filter.detail) params.set("detail", "true");
+  const query = params.toString();
+  return `/api/v1/stream/resources/${gvr.group}/${gvr.version}/${gvr.resource}${query ? `?${query}` : ""}`;
+}
+
+/** Pod-log stream parameters (Story 4.3). */
+export interface PodLogParams {
+  container?: string;
+  follow?: boolean;
+  previous?: boolean;
+  tailLines?: number;
+}
+
+/** Builds the SSE URL for a pod log stream. */
+export function podLogsUrl(namespace: string, name: string, params: PodLogParams = {}): string {
+  const q = new URLSearchParams();
+  if (params.container) q.set("container", params.container);
+  if (params.follow === false) q.set("follow", "false");
+  if (params.previous) q.set("previous", "true");
+  if (params.tailLines !== undefined) q.set("tailLines", String(params.tailLines));
+  const query = q.toString();
+  return `/api/v1/stream/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/logs${query ? `?${query}` : ""}`;
+}
 
 /** Builds the `?namespace=` query, or "" when no namespace is given. */
 function nsQuery(namespace?: string): string {

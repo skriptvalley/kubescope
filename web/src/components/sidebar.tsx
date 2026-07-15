@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 const pinned = [
   { to: "/overview", label: "Overview" },
   { to: "/nodes", label: "Nodes" },
+  { to: "/events", label: "Events" },
 ];
 
 export function Sidebar() {

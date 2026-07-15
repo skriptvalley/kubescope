@@ -1,8 +1,10 @@
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { ControllerDetail } from "@/components/controller-detail";
+import { LiveBadge } from "@/components/live-badge";
+import { LogViewer } from "@/components/log-viewer";
 import { PodDetail } from "@/components/pod-detail";
 import { YamlView } from "@/components/yaml-view";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -15,13 +17,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useResourceObject, useResourceYaml } from "@/hooks/use-resource";
+import { useResourceYaml } from "@/hooks/use-resource";
+import { useLiveResourceObject } from "@/hooks/use-stream";
 import { formatAge } from "@/lib/age";
 import { ApiError, type KubeObject } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { workloadKind } from "@/lib/workloads";
 
-type Tab = "summary" | "yaml";
+type Tab = "summary" | "logs" | "yaml";
 
 export function ResourceDetailPage() {
   const params = useParams();
@@ -34,9 +37,11 @@ export function ResourceDetailPage() {
   const ref = { group, version, resource, namespace, name };
   const [tab, setTab] = useState<Tab>("summary");
   const workload = workloadKind({ group, version, resource });
+  const isPod = workload?.kind === "Pod";
   // Controller detail resolves its own data and never renders the raw object, so
-  // skip the object fetch for those kinds — the YAML tab uses a separate query.
-  const object = useResourceObject(ref, !workload?.controller);
+  // skip the object fetch (and its stream) for those kinds — the YAML tab uses a
+  // separate query.
+  const object = useLiveResourceObject(ref, !workload?.controller);
   const yaml = useResourceYaml(ref, tab === "yaml");
 
   const kind = workload?.kind ?? object.data?.kind ?? resource;
@@ -44,23 +49,45 @@ export function ResourceDetailPage() {
   return (
     <Card>
       <CardHeader className="space-y-1.5">
-        <CardTitle className="break-all">{name}</CardTitle>
-        <CardDescription>
-          {kind} · {group === "core" ? "core" : group}/{version}
-          {namespace ? ` · namespace ${namespace}` : ""}
-        </CardDescription>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1.5">
+            <CardTitle className="break-all">{name}</CardTitle>
+            <CardDescription>
+              {kind} · {group === "core" ? "core" : group}/{version}
+              {namespace ? ` · namespace ${namespace}` : ""}
+            </CardDescription>
+          </div>
+          {!workload?.controller && <LiveBadge status={object.streamStatus} className="mt-1 shrink-0" />}
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {object.deleted && (
+          <Alert variant="destructive">
+            <Trash2 className="h-4 w-4" />
+            <AlertTitle>Object deleted</AlertTitle>
+            <AlertDescription>
+              This {kind} has been deleted from the cluster. The details below are the last known state.
+            </AlertDescription>
+          </Alert>
+        )}
+
         <div className="flex gap-1 border-b" role="tablist" aria-label="Object views">
           <TabButton active={tab === "summary"} onClick={() => setTab("summary")}>
             Summary
           </TabButton>
+          {isPod && (
+            <TabButton active={tab === "logs"} onClick={() => setTab("logs")}>
+              Logs
+            </TabButton>
+          )}
           <TabButton active={tab === "yaml"} onClick={() => setTab("yaml")}>
             YAML
           </TabButton>
         </div>
 
-        {tab === "yaml" ? (
+        {tab === "logs" && isPod ? (
+          <LogViewer namespace={namespace ?? ""} name={name} object={object.data} />
+        ) : tab === "yaml" ? (
           yaml.isPending ? (
             <Skeleton className="h-64 w-full" data-testid="yaml-loading" />
           ) : yaml.isError ? (

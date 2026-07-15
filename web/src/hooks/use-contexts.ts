@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api, type ContextInfo } from "@/lib/api";
+import { clusterScopedKeyPrefixes } from "@/lib/query-keys";
 
 /** All kubeconfig contexts with their active flag. Cheap: no cluster calls. */
 export function useContexts() {
@@ -20,22 +21,9 @@ export function useContextsHealth() {
   });
 }
 
-/** Query keys that hold data scoped to a specific cluster; dropped on switch so
- *  a previously-visited view can never render the prior cluster's cached data.
- *  Includes the generic engine's caches: discovery, namespaces and any
- *  resource list/object/YAML (matched by key prefix). */
-const clusterDataKeys = [
-  ["overview"],
-  ["nodes"],
-  ["discovery"],
-  ["namespaces"],
-  ["resource-list"],
-  ["resource-get"],
-  ["resource-yaml"],
-];
-
 /** Switch the active context, then drop every cluster-scoped cache and refetch
- *  so all views (mounted or not) show the new cluster, never stale data. */
+ *  so all views (mounted or not) show the new cluster, never stale data. Live
+ *  SSE streams re-subscribe automatically once their queries refetch. */
 export function useSwitchContext() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -45,7 +33,7 @@ export function useSwitchContext() {
       queryClient.setQueryData(["contexts"], items);
       // Remove data tied to the old cluster (incl. unmounted views) so a later
       // navigation shows a loading state + fresh fetch, not the prior cluster.
-      for (const key of clusterDataKeys) {
+      for (const key of clusterScopedKeyPrefixes) {
         queryClient.removeQueries({ queryKey: key });
       }
       // Refetch everything still active (health, and any mounted cluster view).

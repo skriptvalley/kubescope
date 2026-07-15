@@ -1,12 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { api, type ResourceRef } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 
-/** A generic resource list for one GVR + namespace scope. */
-export function useResourceList(ref: ResourceRef) {
+/** A generic resource list for one GVR + namespace scope. `refetchInterval`
+ *  lets live callers enable polling only while the SSE stream is unavailable. */
+export function useResourceList(ref: ResourceRef, refetchInterval: number | false = false) {
   return useQuery({
-    queryKey: ["resource-list", ref.group, ref.version, ref.resource, ref.namespace ?? ""],
+    queryKey: queryKeys.resourceList(ref),
     queryFn: () => api.resources.list(ref),
+    refetchInterval,
   });
 }
 
@@ -16,7 +19,7 @@ export function useResourceList(ref: ResourceRef) {
  *  needs the raw object). */
 export function useResourceObject(ref: ResourceRef, enabled = true) {
   return useQuery({
-    queryKey: ["resource-get", ref.group, ref.version, ref.resource, ref.namespace ?? "", ref.name ?? ""],
+    queryKey: queryKeys.resourceObject(ref),
     queryFn: () => api.resources.get(ref),
     enabled,
   });
@@ -26,7 +29,7 @@ export function useResourceObject(ref: ResourceRef, enabled = true) {
  *  when the YAML tab is opened. */
 export function useResourceYaml(ref: ResourceRef, enabled: boolean) {
   return useQuery({
-    queryKey: ["resource-yaml", ref.group, ref.version, ref.resource, ref.namespace ?? "", ref.name ?? ""],
+    queryKey: queryKeys.resourceYaml(ref),
     queryFn: () => api.resources.yaml(ref),
     enabled,
   });
