@@ -99,7 +99,10 @@ export function ResourceDetailPage() {
         {tab === "logs" && isPod ? (
           <LogViewer namespace={namespace ?? ""} name={name} object={object.data} />
         ) : tab === "yaml" ? (
-          <YamlTab refx={ref} kind={kind} readOnly={readOnly} />
+          // A Secret's YAML is masked, so editing it would apply the redaction
+          // marker over the real data — force the YAML tab view-only for Secrets;
+          // values are changed via the dedicated (revealed) flows, not here.
+          <YamlTab refx={ref} kind={kind} readOnly={readOnly || isSecret} />
         ) : workload?.controller ? (
           // Controller detail resolves its own status/pods/events; the generic
           // object fetch is skipped here and only the YAML tab loads it lazily.

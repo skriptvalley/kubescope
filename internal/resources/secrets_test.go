@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -54,6 +55,28 @@ func TestMaskSecretDataNonSecretShape(t *testing.T) {
 	// gated by isSecret at the call site, verified separately.
 	maskSecretData(obj)
 	assert.Equal(t, secretRedaction, obj["data"].(map[string]any)["key"])
+}
+
+func TestMaskStreamObject(t *testing.T) {
+	t.Run("masks a secret in a copy, leaving the original intact", func(t *testing.T) {
+		u := &unstructured.Unstructured{Object: map[string]any{
+			"kind": "Secret",
+			"data": map[string]any{"password": "aHVudGVyMg=="},
+		}}
+		out := MaskStreamObject(secretsGVR, u)
+
+		require.NotSame(t, u, out, "a secret must be masked in a fresh copy")
+		assert.Equal(t, secretRedaction, out.Object["data"].(map[string]any)["password"])
+		// The original (which the informer shares across subscribers) is untouched.
+		assert.Equal(t, "aHVudGVyMg==", u.Object["data"].(map[string]any)["password"],
+			"the shared informer object must not be mutated")
+	})
+
+	t.Run("passes non-secrets through without copying", func(t *testing.T) {
+		u := &unstructured.Unstructured{Object: map[string]any{"kind": "ConfigMap"}}
+		gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
+		assert.Same(t, u, MaskStreamObject(gvr, u), "a non-secret is returned as-is, no copy")
+	})
 }
 
 func secretFixture() *corev1.Secret {

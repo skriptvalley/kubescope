@@ -198,6 +198,52 @@ func TestHubIncludeObjectForDetailSubscribers(t *testing.T) {
 	assert.Equal(t, "web-1", detailEv.Object["metadata"].(map[string]any)["name"])
 }
 
+// TestHubSanitizesDetailObject verifies the ADR-0005 fix: a full object sent to
+// a detail subscriber is passed through the sanitizer first, so sensitive fields
+// (Secret data) are masked server-side before they ever reach a client. Plumbing
+// only — the masking logic itself is tested in internal/resources.
+func TestHubSanitizesDetailObject(t *testing.T) {
+	secretsGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{secretsGVR: "SecretList"},
+	)
+	secret := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata":   map[string]any{"name": "db", "namespace": "default", "uid": "db-uid"},
+		"data":       map[string]any{"password": "aHVudGVyMg=="},
+	}}
+	_, err := client.Resource(secretsGVR).Namespace("default").Create(context.Background(), secret, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	// A sanitizer that redacts secret data in a deep copy (never mutating input).
+	sanitizer := func(gvr schema.GroupVersionResource, u *unstructured.Unstructured) *unstructured.Unstructured {
+		if gvr != secretsGVR {
+			return u
+		}
+		cp := u.DeepCopy()
+		if d, ok := cp.Object["data"].(map[string]any); ok {
+			for k := range d {
+				d[k] = "REDACTED"
+			}
+		}
+		return cp
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	hub := NewHub(&fakeCluster{dyn: client, context: "ctx-a"}, nameShaper, logger, WithObjectSanitizer(sanitizer))
+
+	detail, err := hub.Subscribe(secretsGVR, Filter{Namespace: "default", Name: "db", IncludeObject: true})
+	require.NoError(t, err)
+	defer detail.Close()
+
+	ev := recv(t, detail, 3*time.Second)
+	require.NotNil(t, ev.Object, "detail subscriber receives the full object")
+	data := ev.Object["data"].(map[string]any)
+	assert.Equal(t, "REDACTED", data["password"], "the streamed Secret data must be masked by the sanitizer")
+}
+
 func TestHubResyncBroadcastAndOverflow(t *testing.T) {
 	t.Run("watch-error broadcast flags every subscriber", func(t *testing.T) {
 		client := newFakeClient(t)

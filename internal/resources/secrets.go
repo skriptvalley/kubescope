@@ -45,12 +45,27 @@ func maskSecretData(obj map[string]any) {
 }
 
 // maskIfSecret masks a fetched object's Secret values when the GVR is a Secret.
-// Callers run it on every generic get/yaml/apply response before writing.
+// Callers run it on every generic get/yaml/apply response before writing. It
+// mutates in place — safe because the REST paths fetch a fresh object per call.
 func maskIfSecret(gvr schema.GroupVersionResource, obj *unstructured.Unstructured) {
 	if obj == nil || !isSecret(gvr) {
 		return
 	}
 	maskSecretData(obj.Object)
+}
+
+// MaskStreamObject is the watch-stream sanitizer (ADR-0005): it returns the
+// object to ship to a detail subscriber, masking Secret data in a deep copy so
+// the shared informer cache is never mutated, and passing non-Secrets through
+// untouched (no copy). Wired into the stream Hub so a Secret watched over SSE is
+// masked exactly like the REST detail/YAML views.
+func MaskStreamObject(gvr schema.GroupVersionResource, u *unstructured.Unstructured) *unstructured.Unstructured {
+	if u == nil || !isSecret(gvr) {
+		return u
+	}
+	cp := u.DeepCopy()
+	maskSecretData(cp.Object)
+	return cp
 }
 
 type revealResponse struct {

@@ -120,7 +120,11 @@ func New(opts Options) http.Handler {
 			// over the same transport. Registered only when a stream backend is
 			// wired (production always is; router-only tests skip it).
 			if opts.Stream != nil {
-				hub := stream.NewHub(opts.Stream, resources.ShapeStreamRow, opts.Logger)
+				// The object sanitizer masks Secret data on detail streams so a
+				// watched Secret is redacted server-side, matching the REST views
+				// (ADR-0005) — the SSE detail object is a render path too.
+				hub := stream.NewHub(opts.Stream, resources.ShapeStreamRow, opts.Logger,
+					stream.WithObjectSanitizer(resources.MaskStreamObject))
 				v1.Get("/stream/resources/{group}/{version}/{resource}", stream.StreamHandler(hub, opts.Logger))
 				v1.Get("/stream/pods/{namespace}/{name}/logs", stream.LogsHandler(opts.Stream, opts.Logger))
 			}
