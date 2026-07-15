@@ -40,9 +40,10 @@ type Manager struct {
 	kubeconfigPath string
 	probeTimeout   time.Duration
 
-	mu      sync.RWMutex
-	active  string                   // in-memory override; "" = kubeconfig current-context
-	clients map[string]*cachedClient // per-context cache of successful builds
+	mu       sync.RWMutex
+	active   string                   // in-memory override; "" = kubeconfig current-context
+	clients  map[string]*cachedClient // per-context cache of successful builds
+	onSwitch func(current string)     // notified after a context switch (nil = no observer)
 }
 
 type cachedClient struct {
@@ -126,7 +127,10 @@ func (m *Manager) ActiveContextName() (string, error) {
 }
 
 // SwitchContext sets the active context (in memory only — the mounted
-// kubeconfig is never written). The name must exist in the kubeconfig.
+// kubeconfig is never written). The name must exist in the kubeconfig. After a
+// successful switch it notifies the switch observer (if registered) so
+// per-context live sessions bound to another context — exec terminals,
+// port-forwards — are torn down (Sprint 6); those never outlive their context.
 func (m *Manager) SwitchContext(name string) error {
 	if name == "" {
 		return errors.New("context name must not be empty")
@@ -140,8 +144,22 @@ func (m *Manager) SwitchContext(name string) error {
 	}
 	m.mu.Lock()
 	m.active = name
+	obs := m.onSwitch
 	m.mu.Unlock()
+	if obs != nil {
+		obs(name)
+	}
 	return nil
+}
+
+// SetSwitchObserver registers a callback invoked after every successful
+// SwitchContext with the new active context name. It lets the streaming layer
+// tear down sessions that must not cross a context boundary without the kube
+// package depending on it. Set once at startup; a nil fn clears it.
+func (m *Manager) SetSwitchObserver(fn func(current string)) {
+	m.mu.Lock()
+	m.onSwitch = fn
+	m.mu.Unlock()
 }
 
 // Clientset returns a typed clientset for the active context.
@@ -181,6 +199,19 @@ func (m *Manager) DynamicFor(name string) (dynamic.Interface, error) {
 		return nil, err
 	}
 	return cached.dynamicClient, nil
+}
+
+// RestConfigFor returns the rest.Config for the named context, built and cached
+// alongside the typed and dynamic clients on first use. The exec SPDY executor
+// and the port-forward dialer need the raw config (Sprint 6). A copy is returned
+// so a caller tuning transport-level fields never mutates the config the shared
+// typed/dynamic clients use.
+func (m *Manager) RestConfigFor(name string) (*rest.Config, error) {
+	cached, err := m.clientsFor(name)
+	if err != nil {
+		return nil, err
+	}
+	return rest.CopyConfig(cached.restConfig), nil
 }
 
 // DiscoveryFor returns a discovery client for the named context, used to

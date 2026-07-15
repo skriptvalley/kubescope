@@ -1,7 +1,11 @@
 // Package stream bridges Kubernetes watch and pod-log streams into per-context
-// Server-Sent Events fan-out (ADR-0006). A shared informer per context+GVR
-// feeds every subscriber; pod logs follow over the same SSE transport. The
-// exec WebSocket bridge (ADR-0006) lands in Sprint 6.
+// Server-Sent Events fan-out, exec sessions over WebSocket, and backend-managed
+// port-forwards (ADR-0006). A shared informer per context+GVR feeds every SSE
+// subscriber; pod logs follow over the same SSE transport; the exec terminal
+// rides a WebSocket bridged to the SPDY exec API; port-forwards are a plain HTTP
+// start/stop/list API over a client-go SPDY port-forward registry. Exec sessions
+// and port-forwards are per-context and torn down on a context switch or server
+// shutdown — they never outlive their context.
 package stream
 
 // EventType classifies a watch event on the SSE wire.

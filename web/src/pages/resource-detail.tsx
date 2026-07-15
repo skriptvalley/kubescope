@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 
 import { ControllerDetail } from "@/components/controller-detail";
 import { DeleteResourceButton } from "@/components/resource-actions";
+import { ExecTerminal } from "@/components/exec-terminal";
 import { LiveBadge } from "@/components/live-badge";
 import { LogViewer } from "@/components/log-viewer";
 import { PodDetail } from "@/components/pod-detail";
@@ -26,7 +27,7 @@ import { ApiError, type KubeObject, type ResourceRef } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { workloadKind } from "@/lib/workloads";
 
-type Tab = "summary" | "logs" | "yaml";
+type Tab = "summary" | "logs" | "terminal" | "yaml";
 
 /** Whether a route points at the core Secret kind — its detail masks data. */
 function isSecretRef(ref: ResourceRef): boolean {
@@ -91,6 +92,11 @@ export function ResourceDetailPage() {
               Logs
             </TabButton>
           )}
+          {isPod && (
+            <TabButton active={tab === "terminal"} onClick={() => setTab("terminal")}>
+              Terminal
+            </TabButton>
+          )}
           <TabButton active={tab === "yaml"} onClick={() => setTab("yaml")}>
             YAML
           </TabButton>
@@ -98,6 +104,11 @@ export function ResourceDetailPage() {
 
         {tab === "logs" && isPod ? (
           <LogViewer namespace={namespace ?? ""} name={name} object={object.data} />
+        ) : tab === "terminal" && isPod ? (
+          // Exec is a read-ish capability from the UI's angle, but running
+          // commands can mutate — the server enforces read-only, so if exec is
+          // blocked the socket simply closes with an error the terminal shows.
+          <ExecTerminal namespace={namespace ?? ""} name={name} object={object.data} />
         ) : tab === "yaml" ? (
           // A Secret's YAML is masked, so editing it would apply the redaction
           // marker over the real data — force the YAML tab view-only for Secrets;

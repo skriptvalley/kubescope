@@ -14,7 +14,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": backend,
+      // ws:true upgrades the exec WebSocket (Sprint 6) through the dev proxy;
+      // the backend authorizes localhost origins so make dev works end-to-end.
+      "/api": { target: backend, ws: true },
       "/healthz": backend,
     },
   },

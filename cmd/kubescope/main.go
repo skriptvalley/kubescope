@@ -16,6 +16,7 @@ import (
 	"github.com/skriptvalley/kubescope/internal/config"
 	"github.com/skriptvalley/kubescope/internal/kube"
 	"github.com/skriptvalley/kubescope/internal/server"
+	"github.com/skriptvalley/kubescope/internal/stream"
 	"github.com/skriptvalley/kubescope/web"
 )
 
@@ -34,13 +35,27 @@ func run(logger *slog.Logger) error {
 	}
 
 	mgr := kube.NewManager(cfg.KubeconfigPath)
+
+	// Sprint 6: exec sessions and port-forwards are per-context live sessions.
+	// They must not outlive their context, so a context switch tears down every
+	// session bound to another context, and shutdown tears down all of them.
+	execSessions := stream.NewExecRegistry()
+	portForwards := stream.NewPortForwardManager(mgr, logger)
+	mgr.SetSwitchObserver(func(current string) {
+		execSessions.CloseOthers(current)
+		portForwards.CloseOthers(current)
+	})
+
 	handler := server.New(server.Options{
-		Logger:   logger,
-		Kube:     mgr,
-		Stream:   mgr,
-		ReadOnly: cfg.ReadOnly,
-		AuthMode: cfg.AuthMode,
-		Dist:     web.Dist(),
+		Logger:       logger,
+		Kube:         mgr,
+		Stream:       mgr,
+		Exec:         mgr,
+		ExecSessions: execSessions,
+		PortForwards: portForwards,
+		ReadOnly:     cfg.ReadOnly,
+		AuthMode:     cfg.AuthMode,
+		Dist:         web.Dist(),
 	})
 
 	httpServer := &http.Server{
@@ -72,7 +87,13 @@ func run(logger *slog.Logger) error {
 		logger.Info("shutting down")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		// Stop accepting first, then tear down live sessions: Shutdown does not
+		// drain hijacked WebSockets (exec) or close port-forward listeners, so
+		// they are closed explicitly (Sprint 6 cleanup).
+		err := httpServer.Shutdown(shutdownCtx)
+		execSessions.CloseAll()
+		portForwards.CloseAll()
+		if err != nil {
 			return fmt.Errorf("graceful shutdown: %w", err)
 		}
 		return nil

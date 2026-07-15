@@ -1,8 +1,10 @@
 import { Link } from "react-router-dom";
 
 import { EventsPanel } from "@/components/events-panel";
+import { PortForwardControls } from "@/components/port-forward-controls";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
+import { useReadOnly } from "@/hooks/use-config";
 import type { KubeObject } from "@/lib/api";
 import { routeForKind } from "@/lib/workloads";
 import { podStatusTone, type StatusTone } from "@/lib/workload-status";
@@ -70,6 +72,7 @@ export function PodDetail({
   namespace?: string;
   name: string;
 }) {
+  const readOnly = useReadOnly();
   const pod = object as unknown as PodObject;
   const spec = pod.spec ?? {};
   const status = pod.status ?? {};
@@ -125,6 +128,8 @@ export function PodDetail({
           </ul>
         )}
       </section>
+
+      {!readOnly && <PortForwardControls namespace={namespace ?? ""} pod={name} object={object} />}
 
       <EventsPanel kind="Pod" namespace={namespace} name={name} />
     </div>

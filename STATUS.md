@@ -9,11 +9,11 @@
 - Record any ADR added/changed this session.
 
 ## Current state
-- Last updated: 2026-07-15
-- Last work: Sprint 5 — Mutations + guardrails [sprint]
-- Summary: Write operations shipped, every one behind a confirmation dialog and the ADR-0005 guardrails. Backend: generic apply (`PUT /resources/{g}/{v}/{r}/{name}`) via the dynamic client for any GVK incl. CRDs — body is `{"yaml":...}` so validation is server-side; a stale resourceVersion is surfaced as a 409 (never a silent overwrite), invalid YAML a 400, server validation a 422 (new `writeMutationError` classifies conflict/invalid/already-exists before delegating). Generic delete (`DELETE …`, namespaced or cluster-scoped). Scale via the scale subresource (`POST /workloads/{r}/{ns}/{name}/scale`, Deploy/STS/RS); rollout-restart stamping the `kubectl.kubernetes.io/restartedAt` pod-template annotation (`…/restart`, Deploy/STS/DS). Node cordon/uncordon patch `spec.unschedulable`; drain (`…/drain`) cordons then evicts via the eviction API, skipping DaemonSet/mirror/terminal pods and reporting each pod's outcome (evicted/skipped/blocked/error) — a PDB-blocked eviction (429) is reported, not swallowed. `KUBESCOPE_READ_ONLY=true` enforced by server middleware on a mutation route group: every mutating route returns 403 (a table test enumerates all seven; a direct curl is rejected the same as the UI), while reads and the in-memory context switch stay usable. `GET /api/v1/config` exposes `{readOnly, authMode}` to the FE. Secret data masked by default in get + raw-YAML (`**redacted**`, keys preserved), with per-key reveal via `GET /api/v1/secrets/{ns}/{name}/reveal?key=` (decoded plaintext, never logged). Frontend: CodeMirror 6 YAML editor with an edit/apply flow (confirm dialog, 409 → reload-and-retry banner, inline validation errors); a reusable typed-name confirmation dialog gating every mutation (delete/drain require typing the object/node name); scale/restart controls on controller views, delete from list + detail views, cordon/uncordon + drain (with a per-pod results modal) on the nodes view; a read-only banner + all mutation controls hidden when read-only; masked Secret detail with per-key reveal. Verified: `go test -race ./...` incl. envtest for apply/409-conflict/scale/delete/cordon/drain-eviction(+PDB-blocked)/secret-masking; `fe-test` 119; lint/vet/gofmt/typecheck clean; FE prod build embeds CodeMirror; real-binary curl smoke confirmed read-only 403 on every mutating route and 200 config. Post-implementation review fixed two Secret-exposure findings: (1) the SSE **detail** stream shipped the full object unmasked — a watched Secret leaked its data; added a Hub object-sanitizer (`WithObjectSanitizer` → `resources.MaskStreamObject`, masking a deep copy so the shared informer cache is never mutated) so stream detail matches the masked REST/YAML views; (2) a Secret's YAML tab is now view-only (editing masked data would apply the redaction marker), values change via the reveal flow instead.
-- Next expected: Sprint 6 — Exec terminal + port-forward
-- ADRs touched this session: none (implements ADR-0005 guardrails + ADR-0003 generic apply/delete). Added the CodeMirror 6 frontend deps (`codemirror`, `@codemirror/lang-yaml`, `@codemirror/view`, `@codemirror/state`) — a pre-declared choice in the CLAUDE.md tech stack (YAML editor, Sprint 5), not a new decision.
+- Last updated: 2026-07-16
+- Last work: Sprint 6 — Exec terminal + port-forward [sprint]
+- Summary: In-browser pod operations shipped over the two ADR-0006 transports. Exec (Story 6.1/6.2): `GET /api/v1/stream/pods/{ns}/{name}/exec?container=&command=` upgrades to a WebSocket (coder/websocket) bridged to a client-go SPDY `remotecommand` executor (TTY, stdin/stdout merged). Wire protocol: **binary** frames are raw terminal bytes (stdin up, stdout down); **text** frames are JSON control — client sends `{"type":"resize",cols,rows}`, server sends exactly one terminal `{"type":"exit",code}` or `{"type":"error",message}` just before closing (close status mirrors intent; the control frame is the authoritative payload). A client disconnect cancels the SPDY session (no leaked goroutines); process exit / pod-gone / bad-container / RBAC all surface as a structured close, never a hang. Frontend: a Terminal tab on pod detail (xterm.js 5 + fit addon) with a container selector (fresh session per switch), fit-to-panel resize → resize control frame, and a "session ended" overlay with one-click reconnect; terminal I/O never touches server logs or any client store. Port-forward (Story 6.3): a per-context registry over client-go SPDY port-forward — `POST /api/v1/portforwards` (start; loopback-only listener, `localPort` 0 auto-assigns), `GET /portforwards` (list), `DELETE /portforwards/{id}` (idempotent stop). A forward that dies on its own (pod deleted mid-forward) is dropped by a watcher; a global active-forwards panel lists local→pod mapping, context and uptime with one-click stop. Cleanup: exec sessions + forwards are per-context — a new `kube.Manager` switch observer tears down every session bound to another context on switch, and both registries are closed on graceful shutdown (`http.Server.Shutdown` doesn't drain hijacked WebSockets or close forward listeners). Guardrails (ADR-0005): exec upgrade and port-forward **start** live in the read-only mutation group → 403 before the upgrade / before dialing; list + stop stay usable (backend-local session state, not cluster mutation). New public `kube.Manager.RestConfigFor` (returns a copy) feeds the SPDY executor + port-forward dialer. Verified: `go test -race ./...` incl. envtest (all packages green); `fe-test` 134; lint/vet/gofmt/eslint/tsc clean; FE prod build embeds xterm; **real kind smoke** — exec into nginx (interactive shell, resize, command output, clean exit; delete pod mid-session → structured `exit code 137` close, no hang); port-forward nginx:80→loopback, `curl` through it (nginx welcome), list, stop→listener closed; read-only real-binary curl → exec 403, pf-start 403, pf-list 200.
+- Next expected: Sprint 7 — Config/networking/RBAC/storage + polish
+- ADRs touched this session: none (implements ADR-0006 exec-WebSocket + port-forward). Added `github.com/coder/websocket` (Go) and `@xterm/xterm` + `@xterm/addon-fit` (frontend) — all pre-declared in the CLAUDE.md tech stack (coder/websocket exec; xterm.js 5 terminal, Sprint 6), not new decisions. Added a lightweight switch-observer hook on `kube.Manager` (a dependency-free callback for per-context session teardown), an implementation detail under ADR-0006, not a locked-decision change.
 
 ## Sprint board
 
@@ -113,16 +113,16 @@
   - [x] UI read-only state
   - [x] Secret masking (reveal-on-click)
 
-### Sprint 6 — Exec terminal + port-forward — [todo]
+### Sprint 6 — Exec terminal + port-forward — [done]
 - Story 6.1 — WebSocket exec bridge (backend: coder/websocket ⇆ SPDY exec)
-  - [ ] coder/websocket ⇆ SPDY exec bridge
-  - [ ] Session lifecycle + cleanup
+  - [x] coder/websocket ⇆ SPDY exec bridge
+  - [x] Session lifecycle + cleanup
 - Story 6.2 — xterm.js terminal UI (container select, resize, reconnect)
-  - [ ] Terminal with container select
-  - [ ] Resize + reconnect handling
+  - [x] Terminal with container select
+  - [x] Resize + reconnect handling
 - Story 6.3 — Port-forward (start/stop, list active forwards)
-  - [ ] Start/stop port-forward API
-  - [ ] Active forwards list
+  - [x] Start/stop port-forward API
+  - [x] Active forwards list
 
 ### Sprint 7 — Config/networking/RBAC/storage + polish — [todo]
 - Story 7.1 — ConfigMaps + Secrets (masked by default, reveal-on-click)
@@ -165,5 +165,6 @@
 
 ## Feedback / Review Tasks
 <!-- Format: - [ ] FB-<n>: <description> (source: <sprint/review>, priority: <hi/med/lo>) -->
+- [ ] FB-3: No Host-header allowlist on the API, so a DNS-rebinding page could reach a writable localhost instance (exec, mutations) despite the WebSocket Origin check — Origin-only checks can't stop rebinding, since the same-origin branch trusts `Host==Origin`. App-wide (every endpoint), not exec-specific; current mitigations are the loopback default bind, `KUBESCOPE_READ_ONLY`, and (soon) auth. Fix in the Sprint 8 security pass: a Host-allowlist middleware (configured listen addr + localhost/127.0.0.1[:port]) ahead of the API tree. (source: sprint-6 review, priority: med)
 - [x] FB-2: Context switch left the currently-mounted view (e.g. Overview) showing the prior cluster's data until a manual refresh or navigation. `useSwitchContext` removed cluster-scoped queries before the global invalidate, and a removed active query has no observer to refetch. Fixed: invalidate first (refetches mounted views in place), then drop only `type:"inactive"` caches. Regression test added; verified in-browser against two kind clusters. (source: manual testing, priority: hi) [done]
 - [ ] FB-1: `writeEngineError` collapses every non-NotFound/Forbidden apiserver error to `502 cluster_unreachable` (+ADR-0004 guidance); a genuine apiserver 5xx/conflict is then mislabeled. Sprint 5 addressed this on the write paths — `writeMutationError` classifies Conflict→409, Invalid/BadRequest→422 and AlreadyExists→409 before delegating, so apply/scale/delete/cordon/drain surface those faithfully. The generic *read* engine still routes through `writeEngineError` (reads rarely conflict); revisit only if a read path needs finer 5xx taxonomy. (source: sprint-2 review, priority: lo)

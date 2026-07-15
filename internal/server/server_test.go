@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 
 	"github.com/skriptvalley/kubescope/internal/kube"
 )
@@ -49,6 +50,16 @@ func (f *fakeProvider) DiscoveryFor(string) (discovery.DiscoveryInterface, error
 		return nil, f.err
 	}
 	return f.clientset.Discovery(), f.err
+}
+
+// ClientsetFor / RestConfigFor let fakeProvider satisfy stream.ExecCluster and
+// stream.PortForwardCluster so the exec + port-forward routes register in tests.
+func (f *fakeProvider) ClientsetFor(string) (kubernetes.Interface, error) {
+	return f.clientset, f.err
+}
+
+func (f *fakeProvider) RestConfigFor(string) (*rest.Config, error) {
+	return &rest.Config{Host: "https://example.test"}, f.err
 }
 
 func testServer(t *testing.T, dist fstest.MapFS) http.Handler {

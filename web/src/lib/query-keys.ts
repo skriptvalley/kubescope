@@ -15,6 +15,7 @@ export const queryKeys = {
   workloadSummary: (resource: string, namespace?: string) =>
     ["workload-summary", resource, namespace ?? ""] as const,
   eventsFeed: (namespace?: string) => ["events-feed", namespace ?? ""] as const,
+  portForwards: () => ["port-forwards"] as const,
 };
 
 /** Query-key prefixes whose data is scoped to a single cluster; dropped on
@@ -29,4 +30,7 @@ export const clusterScopedKeyPrefixes = [
   ["resource-yaml"],
   ["workload-summary"],
   ["events-feed"],
+  // Forwards are per-context and torn down server-side on a context switch, so
+  // the list must refetch (the mounted panel) / drop (unmounted) on switch.
+  ["port-forwards"],
 ] as const;

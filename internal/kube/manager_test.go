@@ -111,6 +111,53 @@ func TestSwitchContext(t *testing.T) {
 	assert.Equal(t, "two", active)
 }
 
+func TestSwitchObserverNotifiedWithNewContext(t *testing.T) {
+	ca := testCACert(t)
+	cfg := clientcmdapi.Config{
+		Clusters:  map[string]*clientcmdapi.Cluster{"c": {Server: "https://c:6443", CertificateAuthorityData: ca}},
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{"u": tokenAuth()},
+		Contexts: map[string]*clientcmdapi.Context{
+			"one": {Cluster: "c", AuthInfo: "u"},
+			"two": {Cluster: "c", AuthInfo: "u"},
+		},
+		CurrentContext: "one",
+	}
+	m := NewManager(writeConfig(t, cfg))
+
+	var got []string
+	m.SetSwitchObserver(func(current string) { got = append(got, current) })
+
+	require.NoError(t, m.SwitchContext("two"))
+	assert.Equal(t, []string{"two"}, got, "observer sees the new active context")
+
+	// A rejected switch must not notify — nothing was torn down.
+	assert.Error(t, m.SwitchContext("nope"))
+	assert.Equal(t, []string{"two"}, got, "a failed switch fires no observer")
+}
+
+func TestRestConfigForReturnsIndependentCopy(t *testing.T) {
+	ca := testCACert(t)
+	cfg := clientcmdapi.Config{
+		Clusters:  map[string]*clientcmdapi.Cluster{"c": {Server: "https://c:6443", CertificateAuthorityData: ca}},
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{"u": tokenAuth()},
+		Contexts:  map[string]*clientcmdapi.Context{"one": {Cluster: "c", AuthInfo: "u"}},
+		// CurrentContext intentionally set so ActiveContextName resolves.
+		CurrentContext: "one",
+	}
+	m := NewManager(writeConfig(t, cfg))
+
+	rc, err := m.RestConfigFor("one")
+	require.NoError(t, err)
+	assert.Equal(t, "https://c:6443", rc.Host)
+
+	// The returned config is a copy: mutating it (as the exec/port-forward paths
+	// might) must not corrupt the cached config the shared clients use.
+	rc.Timeout = 42 * time.Second
+	rc2, err := m.RestConfigFor("one")
+	require.NoError(t, err)
+	assert.Zero(t, rc2.Timeout, "RestConfigFor must hand out an independent copy")
+}
+
 func TestSwitchContextNeverWritesKubeconfig(t *testing.T) {
 	ca := testCACert(t)
 	cfg := clientcmdapi.Config{
