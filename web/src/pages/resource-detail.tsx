@@ -2,6 +2,8 @@ import { AlertCircle } from "lucide-react";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 
+import { ControllerDetail } from "@/components/controller-detail";
+import { PodDetail } from "@/components/pod-detail";
 import { YamlView } from "@/components/yaml-view";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +19,7 @@ import { useResourceObject, useResourceYaml } from "@/hooks/use-resource";
 import { formatAge } from "@/lib/age";
 import { ApiError, type KubeObject } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { workloadKind } from "@/lib/workloads";
 
 type Tab = "summary" | "yaml";
 
@@ -30,10 +33,13 @@ export function ResourceDetailPage() {
 
   const ref = { group, version, resource, namespace, name };
   const [tab, setTab] = useState<Tab>("summary");
-  const object = useResourceObject(ref);
+  const workload = workloadKind({ group, version, resource });
+  // Controller detail resolves its own data and never renders the raw object, so
+  // skip the object fetch for those kinds — the YAML tab uses a separate query.
+  const object = useResourceObject(ref, !workload?.controller);
   const yaml = useResourceYaml(ref, tab === "yaml");
 
-  const kind = object.data?.kind ?? resource;
+  const kind = workload?.kind ?? object.data?.kind ?? resource;
 
   return (
     <Card>
@@ -54,18 +60,26 @@ export function ResourceDetailPage() {
           </TabButton>
         </div>
 
-        {object.isPending ? (
+        {tab === "yaml" ? (
+          yaml.isPending ? (
+            <Skeleton className="h-64 w-full" data-testid="yaml-loading" />
+          ) : yaml.isError ? (
+            <DetailError error={yaml.error} />
+          ) : (
+            <YamlView yaml={yaml.data} />
+          )
+        ) : workload?.controller ? (
+          // Controller detail resolves its own status/pods/events; the generic
+          // object fetch is skipped here and only the YAML tab loads it lazily.
+          <ControllerDetail resource={resource} kind={workload.kind} namespace={namespace ?? ""} name={name} />
+        ) : object.isPending ? (
           <Skeleton className="h-40 w-full" data-testid="detail-loading" />
         ) : object.isError ? (
           <DetailError error={object.error} />
-        ) : tab === "summary" ? (
-          <Summary object={object.data} />
-        ) : yaml.isPending ? (
-          <Skeleton className="h-64 w-full" data-testid="yaml-loading" />
-        ) : yaml.isError ? (
-          <DetailError error={yaml.error} />
+        ) : workload ? (
+          <PodDetail object={object.data} namespace={namespace} name={name} />
         ) : (
-          <YamlView yaml={yaml.data} />
+          <Summary object={object.data} />
         )}
       </CardContent>
     </Card>

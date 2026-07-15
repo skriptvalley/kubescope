@@ -22,16 +22,18 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-const deploymentsDiscovery: Discovery = {
+// A non-workload namespaced kind exercises the generic engine path (workload
+// kinds like Deployment now render the typed summary view instead).
+const configmapsDiscovery: Discovery = {
   groups: [
     {
-      name: "apps",
+      name: "",
       resources: [
         {
-          group: "apps",
+          group: "",
           version: "v1",
-          resource: "deployments",
-          kind: "Deployment",
+          resource: "configmaps",
+          kind: "ConfigMap",
           namespaced: true,
           verbs: ["list"],
         },
@@ -51,12 +53,12 @@ const nodesDiscovery: Discovery = {
   ],
 };
 
-function deploymentList(rows: ResourceList["rows"]): ResourceList {
+function configmapList(rows: ResourceList["rows"]): ResourceList {
   return {
-    group: "apps",
+    group: "",
     version: "v1",
-    resource: "deployments",
-    kind: "Deployment",
+    resource: "configmaps",
+    kind: "ConfigMap",
     namespaced: true,
     columns: [
       { id: "name", header: "Name" },
@@ -89,29 +91,29 @@ beforeEach(() => {
 
 describe("ResourceListPage", () => {
   it("renders rows and a namespace selector for a namespaced kind", async () => {
-    discoveryMock.mockResolvedValue(deploymentsDiscovery);
+    discoveryMock.mockResolvedValue(configmapsDiscovery);
     listMock.mockResolvedValue(
-      deploymentList([{ name: "web", namespace: "default", creationTimestamp: "2026-07-14T10:00:00Z" }]),
+      configmapList([{ name: "app-config", namespace: "default", creationTimestamp: "2026-07-14T10:00:00Z" }]),
     );
 
-    renderList("/resources/apps/v1/deployments");
+    renderList("/resources/core/v1/configmaps");
 
-    expect(await screen.findByRole("link", { name: "web" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "app-config" })).toBeInTheDocument();
     expect(await screen.findByLabelText("Namespace")).toBeInTheDocument();
-    expect(screen.getByText("Deployment")).toBeInTheDocument();
+    expect(screen.getByText("ConfigMap")).toBeInTheDocument();
   });
 
   it("forwards the selected namespace for a namespaced kind", async () => {
-    discoveryMock.mockResolvedValue(deploymentsDiscovery);
+    discoveryMock.mockResolvedValue(configmapsDiscovery);
     listMock.mockResolvedValue(
-      deploymentList([{ name: "web", namespace: "default", creationTimestamp: "2026-07-14T10:00:00Z" }]),
+      configmapList([{ name: "app-config", namespace: "default", creationTimestamp: "2026-07-14T10:00:00Z" }]),
     );
 
-    renderList("/resources/apps/v1/deployments?ns=default");
+    renderList("/resources/core/v1/configmaps?ns=default");
 
-    expect(await screen.findByRole("link", { name: "web" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "app-config" })).toBeInTheDocument();
     expect(listMock).toHaveBeenCalledWith(
-      expect.objectContaining({ resource: "deployments", namespace: "default" }),
+      expect.objectContaining({ resource: "configmaps", namespace: "default" }),
     );
   });
 
@@ -141,11 +143,11 @@ describe("ResourceListPage", () => {
   });
 
   it("shows an empty state when there are no objects", async () => {
-    discoveryMock.mockResolvedValue(deploymentsDiscovery);
-    listMock.mockResolvedValue(deploymentList([]));
+    discoveryMock.mockResolvedValue(configmapsDiscovery);
+    listMock.mockResolvedValue(configmapList([]));
 
-    renderList("/resources/apps/v1/deployments");
-    expect(await screen.findByText(/no deployments found/i)).toBeInTheDocument();
+    renderList("/resources/core/v1/configmaps");
+    expect(await screen.findByText(/no configmaps found/i)).toBeInTheDocument();
   });
 
   it("surfaces a structured unknown-resource error", async () => {
