@@ -35,10 +35,12 @@ func run(logger *slog.Logger) error {
 
 	mgr := kube.NewManager(cfg.KubeconfigPath)
 	handler := server.New(server.Options{
-		Logger: logger,
-		Kube:   mgr,
-		Stream: mgr,
-		Dist:   web.Dist(),
+		Logger:   logger,
+		Kube:     mgr,
+		Stream:   mgr,
+		ReadOnly: cfg.ReadOnly,
+		AuthMode: cfg.AuthMode,
+		Dist:     web.Dist(),
 	})
 
 	httpServer := &http.Server{

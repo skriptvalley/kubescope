@@ -34,6 +34,12 @@ type Options struct {
 	// Stream backs the watch→SSE and pod-log endpoints (ADR-0006). When nil,
 	// the streaming routes are not registered (used by router-only tests).
 	Stream StreamCluster
+	// ReadOnly rejects every mutating route with a 403 via server-side
+	// middleware — the bypass-proof guardrail from ADR-0005. The UI reads the
+	// same flag from /api/v1/config to disable controls, but this is the control.
+	ReadOnly bool
+	// AuthMode is surfaced to the frontend via /api/v1/config (none|basic|oidc).
+	AuthMode string
 	// Dist is the built SPA (index.html at its root).
 	Dist fs.FS
 }
@@ -70,6 +76,10 @@ func New(opts Options) http.Handler {
 			v1.Get("/overview", resources.OverviewHandler(opts.Kube, opts.Logger))
 			v1.Get("/namespaces", resources.NamespacesHandler(opts.Kube, opts.Logger))
 			v1.Get("/discovery", resources.DiscoveryHandler(disco, opts.Kube, opts.Logger))
+			// Server posture the UI reflects (read-only, auth mode). Touches no
+			// cluster, so it answers even when no cluster is reachable (ADR-0005).
+			v1.Get("/config", resources.ConfigHandler(
+				resources.ServerConfig{ReadOnly: opts.ReadOnly, AuthMode: opts.AuthMode}, opts.Logger))
 			// Generic resource engine: any GVR via the dynamic client. The
 			// core group travels as the literal token "core" in the path.
 			v1.Get("/resources/{group}/{version}/{resource}", resources.ListHandler(opts.Kube, disco, opts.Logger))
@@ -84,6 +94,26 @@ func New(opts Options) http.Handler {
 			// Cluster-wide/per-namespace events feed (Sprint 4): initial-paint +
 			// polling-fallback complement to the live events stream below.
 			v1.Get("/events/feed", resources.EventsFeedHandler(opts.Kube, opts.Logger))
+			// Per-key Secret reveal: the one read that returns a real Secret value,
+			// one key at a time on explicit action (ADR-0005). A read, so it is not
+			// gated by read-only mode.
+			v1.Get("/secrets/{namespace}/{name}/reveal", resources.RevealSecretHandler(opts.Kube, opts.Logger))
+
+			// Mutating routes (Sprint 5). Registered behind read-only middleware so
+			// KUBESCOPE_READ_ONLY=true returns 403 for every one of them, server-
+			// side and bypass-proof — a direct API call is rejected the same as the
+			// UI (ADR-0005). Every mutation lives here; nothing mutating is
+			// registered outside this group.
+			v1.Group(func(m chi.Router) {
+				m.Use(readOnlyGuard(opts.ReadOnly))
+				m.Put("/resources/{group}/{version}/{resource}/{name}", resources.UpdateHandler(opts.Kube, disco, opts.Logger))
+				m.Delete("/resources/{group}/{version}/{resource}/{name}", resources.DeleteHandler(opts.Kube, disco, opts.Logger))
+				m.Post("/workloads/{resource}/{namespace}/{name}/scale", resources.ScaleHandler(opts.Kube, opts.Logger))
+				m.Post("/workloads/{resource}/{namespace}/{name}/restart", resources.RestartHandler(opts.Kube, opts.Logger))
+				m.Post("/nodes/{name}/cordon", resources.CordonHandler(opts.Kube, opts.Logger))
+				m.Post("/nodes/{name}/uncordon", resources.UncordonHandler(opts.Kube, opts.Logger))
+				m.Post("/nodes/{name}/drain", resources.DrainHandler(opts.Kube, opts.Logger))
+			})
 
 			// Live updates (Sprint 4, ADR-0006): a shared informer per
 			// context+GVR fans watch events out over SSE, and pod logs follow

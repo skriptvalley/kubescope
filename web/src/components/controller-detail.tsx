@@ -3,6 +3,7 @@ import { AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { EventsPanel } from "@/components/events-panel";
+import { RestartButton, ScaleControl } from "@/components/resource-actions";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,6 +25,23 @@ import { routeForKind } from "@/lib/workloads";
 import { podStatusTone } from "@/lib/workload-status";
 
 const POD_OWNING = new Set(["deployments", "statefulsets", "daemonsets", "replicasets", "jobs"]);
+const SCALABLE = new Set(["deployments", "statefulsets", "replicasets"]);
+const RESTARTABLE = new Set(["deployments", "statefulsets", "daemonsets"]);
+
+/** The desired replica count for a scalable kind, used to prefill the scale
+ *  control; other kinds have no replica field. */
+function desiredReplicas(resource: string, row: WorkloadSummary): number {
+  switch (resource) {
+    case "deployments":
+      return (row as DeploymentSummary).desiredReplicas;
+    case "statefulsets":
+      return (row as StatefulSetSummary).desiredReplicas;
+    case "replicasets":
+      return (row as ReplicaSetSummary).desiredReplicas;
+    default:
+      return 0;
+  }
+}
 
 /** Controller detail: replica health + a kubectl-style rollout line (both
  *  computed server-side), plus the pods (or, for a CronJob, the Jobs) it owns.
@@ -34,11 +52,13 @@ export function ControllerDetail({
   kind,
   namespace,
   name,
+  readOnly,
 }: {
   resource: string;
   kind: string;
   namespace: string;
   name: string;
+  readOnly: boolean;
 }) {
   // All hooks run unconditionally (enabled toggles the fetch) so switching
   // between controller kinds without unmount never trips the rules of hooks.
@@ -47,9 +67,26 @@ export function ControllerDetail({
   const ownedJobs = useOwnedJobs(namespace, name, resource === "cronjobs");
 
   const row = summary.data?.find((r) => r.name === name);
+  const showActions = !readOnly && row && (SCALABLE.has(resource) || RESTARTABLE.has(resource));
 
   return (
     <div className="space-y-6">
+      {showActions && (
+        <div className="flex flex-wrap items-center gap-3" data-testid="controller-actions">
+          {SCALABLE.has(resource) && (
+            <ScaleControl
+              resource={resource}
+              namespace={namespace}
+              name={name}
+              current={desiredReplicas(resource, row)}
+            />
+          )}
+          {RESTARTABLE.has(resource) && (
+            <RestartButton resource={resource} namespace={namespace} name={name} kind={kind} />
+          )}
+        </div>
+      )}
+
       {summary.isPending ? (
         <Skeleton className="h-20 w-full" data-testid="controller-summary-loading" />
       ) : summary.isError ? (

@@ -12,7 +12,9 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...original,
-    api: { nodes: { list: listMock } },
+    // Read-only by default here, so these node tests assert list rendering
+    // without the mutation-action column (covered separately).
+    api: { nodes: { list: listMock }, config: async () => ({ readOnly: true, authMode: "none" }) },
   };
 });
 

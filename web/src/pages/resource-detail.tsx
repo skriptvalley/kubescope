@@ -3,10 +3,12 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { ControllerDetail } from "@/components/controller-detail";
+import { DeleteResourceButton } from "@/components/resource-actions";
 import { LiveBadge } from "@/components/live-badge";
 import { LogViewer } from "@/components/log-viewer";
 import { PodDetail } from "@/components/pod-detail";
-import { YamlView } from "@/components/yaml-view";
+import { SecretDetail } from "@/components/secret-detail";
+import { YamlTab } from "@/components/yaml-tab";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -17,14 +19,19 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useResourceYaml } from "@/hooks/use-resource";
+import { useReadOnly } from "@/hooks/use-config";
 import { useLiveResourceObject } from "@/hooks/use-stream";
 import { formatAge } from "@/lib/age";
-import { ApiError, type KubeObject } from "@/lib/api";
+import { ApiError, type KubeObject, type ResourceRef } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { workloadKind } from "@/lib/workloads";
 
 type Tab = "summary" | "logs" | "yaml";
+
+/** Whether a route points at the core Secret kind — its detail masks data. */
+function isSecretRef(ref: ResourceRef): boolean {
+  return ref.group === "core" && ref.version === "v1" && ref.resource === "secrets";
+}
 
 export function ResourceDetailPage() {
   const params = useParams();
@@ -36,13 +43,14 @@ export function ResourceDetailPage() {
 
   const ref = { group, version, resource, namespace, name };
   const [tab, setTab] = useState<Tab>("summary");
+  const readOnly = useReadOnly();
   const workload = workloadKind({ group, version, resource });
   const isPod = workload?.kind === "Pod";
+  const isSecret = isSecretRef(ref);
   // Controller detail resolves its own data and never renders the raw object, so
   // skip the object fetch (and its stream) for those kinds — the YAML tab uses a
   // separate query.
   const object = useLiveResourceObject(ref, !workload?.controller);
-  const yaml = useResourceYaml(ref, tab === "yaml");
 
   const kind = workload?.kind ?? object.data?.kind ?? resource;
 
@@ -57,7 +65,10 @@ export function ResourceDetailPage() {
               {namespace ? ` · namespace ${namespace}` : ""}
             </CardDescription>
           </div>
-          {!workload?.controller && <LiveBadge status={object.streamStatus} className="mt-1 shrink-0" />}
+          <div className="flex shrink-0 items-center gap-2">
+            {!workload?.controller && <LiveBadge status={object.streamStatus} className="mt-1" />}
+            {!readOnly && <DeleteResourceButton refx={ref} kind={kind} />}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -88,21 +99,23 @@ export function ResourceDetailPage() {
         {tab === "logs" && isPod ? (
           <LogViewer namespace={namespace ?? ""} name={name} object={object.data} />
         ) : tab === "yaml" ? (
-          yaml.isPending ? (
-            <Skeleton className="h-64 w-full" data-testid="yaml-loading" />
-          ) : yaml.isError ? (
-            <DetailError error={yaml.error} />
-          ) : (
-            <YamlView yaml={yaml.data} />
-          )
+          <YamlTab refx={ref} kind={kind} readOnly={readOnly} />
         ) : workload?.controller ? (
           // Controller detail resolves its own status/pods/events; the generic
           // object fetch is skipped here and only the YAML tab loads it lazily.
-          <ControllerDetail resource={resource} kind={workload.kind} namespace={namespace ?? ""} name={name} />
+          <ControllerDetail
+            resource={resource}
+            kind={workload.kind}
+            namespace={namespace ?? ""}
+            name={name}
+            readOnly={readOnly}
+          />
         ) : object.isPending ? (
           <Skeleton className="h-40 w-full" data-testid="detail-loading" />
         ) : object.isError ? (
           <DetailError error={object.error} />
+        ) : isSecret ? (
+          <SecretDetail object={object.data} namespace={namespace ?? ""} name={name} />
         ) : workload ? (
           <PodDetail object={object.data} namespace={namespace} name={name} />
         ) : (
