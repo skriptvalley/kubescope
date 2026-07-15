@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 
 import { Layout } from "@/components/layout";
+import { EventsPage } from "@/pages/events";
 import { NodesPage } from "@/pages/nodes";
 import { OverviewPage } from "@/pages/overview";
 import { ResourceDetailPage } from "@/pages/resource-detail";
@@ -28,6 +29,7 @@ const router = createBrowserRouter([
       { index: true, element: <Navigate to="/overview" replace /> },
       { path: "overview", element: <OverviewPage /> },
       { path: "nodes", element: <NodesPage /> },
+      { path: "events", element: <EventsPage /> },
       // Generic resource engine. Namespaced objects deep-link with their
       // namespace segment; cluster-scoped ones without.
       { path: "resources/:group/:version/:resource", element: <ResourceListPage /> },
