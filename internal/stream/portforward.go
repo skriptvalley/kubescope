@@ -177,6 +177,18 @@ func (m *PortForwardManager) start(req startRequest) (PortForward, error) {
 	m.forwards[id] = &activeForward{PortForward: pf, stop: fwd.stop}
 	m.mu.Unlock()
 
+	// Establishing the forward can block for seconds; a context switch during
+	// that window runs CloseOthers before this forward was registered, so it
+	// would miss it and the forward would outlive its context. Reconcile: if the
+	// active context has moved on, tear this forward down now. remove() is
+	// idempotent, so a CloseOthers that already reaped it just makes this a no-op.
+	if current, cerr := m.cluster.ActiveContextName(); cerr != nil || current != ctxName {
+		if m.remove(id) {
+			fwd.stop()
+		}
+		return PortForward{}, fmt.Errorf("active context changed while establishing forward to %s/%s", req.Namespace, req.Pod)
+	}
+
 	// A forward exiting on its own (pod deleted mid-forward) is removed so the
 	// list never shows a dead forward. A deliberate Stop closes the same done
 	// channel; remove is idempotent, so the watcher is harmless either way.
@@ -395,7 +407,15 @@ func spdyForwarderFactory(t forwardTarget) (forwarder, error) {
 	case err := <-errCh:
 		return nil, err
 	case <-doneCh:
-		return nil, errors.New("port-forward closed before becoming ready")
+		// ForwardPorts sends to errCh before it closes doneCh, so if it failed
+		// (e.g. "address already in use") the error is already buffered — prefer
+		// it over the generic message so classification (port_in_use) survives.
+		select {
+		case err := <-errCh:
+			return nil, err
+		default:
+			return nil, errors.New("port-forward closed before becoming ready")
+		}
 	case <-time.After(pfReadyTimeout):
 		close(stopCh)
 		return nil, errors.New("timed out establishing port-forward")

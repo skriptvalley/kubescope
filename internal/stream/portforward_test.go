@@ -113,6 +113,28 @@ func TestPortForwardAutoRemovesDeadForward(t *testing.T) {
 		"a self-closed forward must be removed from the list")
 }
 
+func TestPortForwardReconcilesContextSwitchDuringEstablish(t *testing.T) {
+	// A context switch during the (blocking) establish would run CloseOthers
+	// before this forward was registered; the post-establish reconcile must tear
+	// it down rather than let it outlive its context.
+	cluster := &fakePFCluster{ctx: "ctx-a"}
+	var created []*fakeForwarder
+	// The factory simulates the switch happening while it establishes.
+	factory := func(t forwardTarget) (forwarder, error) {
+		cluster.setContext("ctx-b")
+		f := newFakeForwarder(15000)
+		created = append(created, f)
+		return f, nil
+	}
+	m := newTestPFManager(cluster, factory)
+
+	_, err := m.start(startRequest{Namespace: "default", Pod: "nginx", RemotePort: 80})
+	require.Error(t, err, "start must fail when the context moved on during establish")
+	assert.Empty(t, m.List(), "the stale-context forward must not be registered")
+	require.Len(t, created, 1)
+	assert.True(t, created[0].stopped.Load(), "the stale-context forward must be stopped")
+}
+
 func TestPortForwardCloseOthers(t *testing.T) {
 	var created []*fakeForwarder
 	cluster := &fakePFCluster{ctx: "ctx-a"}

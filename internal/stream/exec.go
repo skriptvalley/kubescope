@@ -152,8 +152,10 @@ func ExecHandler(cluster ExecCluster, reg *ExecRegistry, logger *slog.Logger, op
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			// Same-origin is always authorized (the embedded SPA); these patterns
 			// additionally allow the Vite dev proxy (make dev) without opening the
-			// exec socket to arbitrary cross-origin pages.
-			OriginPatterns: []string{"localhost:*", "127.0.0.1:*", "[::1]:*"},
+			// exec socket to arbitrary cross-origin pages. Patterns are matched with
+			// path.Match, so the IPv6-loopback brackets must be escaped or they are
+			// read as a character class (a dead, never-matching entry).
+			OriginPatterns: []string{"localhost:*", "127.0.0.1:*", `\[::1\]:*`},
 		})
 		if err != nil {
 			logger.Warn("exec websocket upgrade failed", "error", err)
@@ -252,8 +254,18 @@ func runExecSession(ctx context.Context, conn *websocket.Conn, exec remotecomman
 		Tty:               true,
 		TerminalSizeQueue: sizes,
 	})
-	cancel() // unblock the read loop
+	// Report the outcome and close the socket BEFORE tearing the context down.
+	// Cancelling the read context makes coder/websocket close the underlying
+	// connection (Read arms a cancel→close), which would race — and usually drop
+	// — the authoritative exit/error control frame and the close. closeExecResult
+	// does its own Close, which unblocks a read loop parked in conn.Read.
 	closeExecResult(conn, logger, err)
+	cancel()
+	// Unblock a read loop parked in stdinW.Write: once the executor has returned
+	// nothing drains the pipe, so a stray stdin frame in flight would hang the
+	// goroutine (conn.Close does not wake a pipe write). Closing the read end
+	// makes that Write return promptly.
+	_ = stdinR.Close()
 }
 
 // wsWriter adapts a WebSocket connection into an io.Writer of binary frames —
