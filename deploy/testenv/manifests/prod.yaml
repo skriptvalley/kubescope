@@ -1,0 +1,40 @@
+# "prod" cluster — a deliberately lighter set so switching contexts in the UI
+# shows visibly different data (and a second per-context health entry).
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: web, namespace: default, labels: { app: web, env: prod } }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: web } }
+  template:
+    metadata: { labels: { app: web, env: prod } }
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.27-alpine
+        ports: [{ containerPort: 80 }]
+        resources: { requests: { cpu: 10m, memory: 16Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: web, namespace: default }
+spec:
+  selector: { app: web }
+  ports: [{ port: 80, targetPort: 80 }]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: heartbeat, namespace: default }
+spec:
+  schedule: "*/1 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: heartbeat
+            image: busybox:1.36
+            command: ["sh","-c","echo 'prod heartbeat ok'; sleep 2"]

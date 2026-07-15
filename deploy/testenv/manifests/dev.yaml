@@ -1,0 +1,155 @@
+# "dev" cluster — a rich sample workload set spanning all seven typed workload
+# kinds plus config/networking, across three namespaces, for manually exercising
+# Kubescope's lists, detail views, live updates, log streaming and events feed.
+# Images are pinned and lightweight; the postgres StatefulSet is a busybox
+# stand-in (this environment is for exercising the UI, not real databases).
+apiVersion: v1
+kind: Namespace
+metadata: { name: web }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: data }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: batch }
+---
+# --- web namespace: frontend (nginx) + logging api + config/secret + service ---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: frontend, namespace: web, labels: { app: frontend, tier: web } }
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: frontend } }
+  template:
+    metadata: { labels: { app: frontend, tier: web } }
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.27-alpine
+        ports: [{ containerPort: 80 }]
+        resources: { requests: { cpu: 10m, memory: 16Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: frontend, namespace: web }
+spec:
+  selector: { app: frontend }
+  ports: [{ port: 80, targetPort: 80 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: api, namespace: web, labels: { app: api, tier: backend } }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: api } }
+  template:
+    metadata: { labels: { app: api } }
+    spec:
+      containers:
+      - name: api
+        image: busybox:1.36
+        command: ["sh","-c","i=0; while true; do i=$((i+1)); echo \"[api] $(date +%T) handled request #$i status=200 pod=$(hostname)\"; sleep 2; done"]
+        resources: { requests: { cpu: 5m, memory: 8Mi } }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: frontend-config, namespace: web }
+data:
+  APP_ENV: "development"
+  LOG_LEVEL: "debug"
+  FEATURE_FLAGS: "live-updates,logs,events"
+---
+apiVersion: v1
+kind: Secret
+metadata: { name: api-credentials, namespace: web }
+type: Opaque
+stringData:
+  DB_PASSWORD: "s3cr3t-dev-password"
+  API_TOKEN: "tok_dev_abc123"
+---
+# --- data namespace: a StatefulSet + headless service + a DaemonSet ---
+apiVersion: v1
+kind: Service
+metadata: { name: postgres, namespace: data }
+spec:
+  clusterIP: None
+  selector: { app: postgres }
+  ports: [{ port: 5432 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: postgres, namespace: data, labels: { app: postgres } }
+spec:
+  serviceName: postgres
+  replicas: 2
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata: { labels: { app: postgres } }
+    spec:
+      containers:
+      - name: postgres
+        image: busybox:1.36
+        command: ["sh","-c","while true; do echo \"[postgres] $(date +%T) checkpoint complete, wal flushed\"; sleep 5; done"]
+        resources: { requests: { cpu: 5m, memory: 8Mi } }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: { name: log-agent, namespace: data, labels: { app: log-agent } }
+spec:
+  selector: { matchLabels: { app: log-agent } }
+  template:
+    metadata: { labels: { app: log-agent } }
+    spec:
+      containers:
+      - name: agent
+        image: busybox:1.36
+        command: ["sh","-c","while true; do echo \"[log-agent] $(date +%T) shipped 42 log lines\"; sleep 4; done"]
+        resources: { requests: { cpu: 5m, memory: 8Mi } }
+---
+# --- batch namespace: a completed Job, a per-minute CronJob, a crashing pod ---
+apiVersion: batch/v1
+kind: Job
+metadata: { name: db-migrate, namespace: batch }
+spec:
+  backoffLimit: 2
+  template:
+    metadata: { labels: { job: db-migrate } }
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: migrate
+        image: busybox:1.36
+        command: ["sh","-c","echo 'applying migration 0007_add_events...'; sleep 6; echo 'migration complete'"]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: hourly-report, namespace: batch }
+spec:
+  schedule: "*/1 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: report
+            image: busybox:1.36
+            command: ["sh","-c","echo 'generating usage report...'; sleep 4; echo 'report uploaded'"]
+---
+# A pod that keeps crashing — produces CrashLoopBackOff status, Warning/BackOff
+# events, and "previous" container logs.
+apiVersion: v1
+kind: Pod
+metadata: { name: crasher, namespace: batch, labels: { app: crasher } }
+spec:
+  restartPolicy: Always
+  containers:
+  - name: crasher
+    image: busybox:1.36
+    command: ["sh","-c","echo 'crasher booting'; echo 'connecting to database...'; sleep 3; echo 'FATAL: connection refused after 3 retries'; exit 1"]
+    resources: { requests: { cpu: 5m, memory: 8Mi } }

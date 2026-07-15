@@ -8,7 +8,8 @@ ENVTEST_K8S_VERSION ?= 1.36.x
 GO_PKG_DIRS       = $(shell go list -f '{{.Dir}}' ./...)
 
 .PHONY: dev dev-backend build test lint docker-build docker-build-local docker-run \
-        fe-dev fe-build fe-test kind-up kind-down smoke help
+        fe-dev fe-build fe-test kind-up kind-down smoke help \
+        testenv-up testenv-down testenv-status
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-20s %s\n", $$1, $$2}'
@@ -75,3 +76,12 @@ kind-down: ## Delete the local kind cluster
 
 smoke: ## Build image + run against kind + assert node list end-to-end
 	deploy/smoke.sh
+
+testenv-up: ## Bring up the local test environment (2 kind clusters + sample resources)
+	deploy/testenv/testenv.sh up
+
+testenv-down: ## Tear down the local test environment
+	deploy/testenv/testenv.sh down
+
+testenv-status: ## Show the local test environment status
+	deploy/testenv/testenv.sh status
