@@ -1,7 +1,8 @@
-import { AlertCircle, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
+import { EmptyState } from "@/components/empty-state";
+import { ErrorState } from "@/components/error-state";
 import { NodeActions } from "@/components/node-actions";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +17,6 @@ import {
 } from "@/components/ui/table";
 import { useReadOnly } from "@/hooks/use-config";
 import { useNodes } from "@/hooks/use-nodes";
-import { ApiError } from "@/lib/api";
 
 function statusVariant(status: string): "default" | "secondary" | "destructive" {
   switch (status) {
@@ -55,11 +55,9 @@ export function NodesPage() {
         {isPending ? (
           <NodesSkeleton />
         ) : isError ? (
-          <NodesError error={error} />
+          <ErrorState error={error} onRetry={() => refetch()} title="Failed to load nodes" />
         ) : data.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            No nodes found in this cluster.
-          </p>
+          <EmptyState message="No nodes found in this cluster." />
         ) : (
           <Table>
             <TableHeader>
@@ -108,17 +106,5 @@ function NodesSkeleton() {
         <Skeleton key={row} className="h-9 w-full" />
       ))}
     </div>
-  );
-}
-
-function NodesError({ error }: { error: Error }) {
-  const detail =
-    error instanceof ApiError ? `${error.message} (${error.code})` : error.message;
-  return (
-    <Alert variant="destructive">
-      <AlertCircle className="h-4 w-4" />
-      <AlertTitle>Failed to load nodes</AlertTitle>
-      <AlertDescription>{detail}</AlertDescription>
-    </Alert>
   );
 }

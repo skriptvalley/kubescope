@@ -10,10 +10,10 @@
 
 ## Current state
 - Last updated: 2026-07-16
-- Last work: Sprint 6 — Exec terminal + port-forward [sprint]
-- Summary: In-browser pod operations shipped over the two ADR-0006 transports. Exec (Story 6.1/6.2): `GET /api/v1/stream/pods/{ns}/{name}/exec?container=&command=` upgrades to a WebSocket (coder/websocket) bridged to a client-go SPDY `remotecommand` executor (TTY, stdin/stdout merged). Wire protocol: **binary** frames are raw terminal bytes (stdin up, stdout down); **text** frames are JSON control — client sends `{"type":"resize",cols,rows}`, server sends exactly one terminal `{"type":"exit",code}` or `{"type":"error",message}` just before closing (close status mirrors intent; the control frame is the authoritative payload). A client disconnect cancels the SPDY session (no leaked goroutines); process exit / pod-gone / bad-container / RBAC all surface as a structured close, never a hang. Frontend: a Terminal tab on pod detail (xterm.js 5 + fit addon) with a container selector (fresh session per switch), fit-to-panel resize → resize control frame, and a "session ended" overlay with one-click reconnect; terminal I/O never touches server logs or any client store. Port-forward (Story 6.3): a per-context registry over client-go SPDY port-forward — `POST /api/v1/portforwards` (start; loopback-only listener, `localPort` 0 auto-assigns), `GET /portforwards` (list), `DELETE /portforwards/{id}` (idempotent stop). A forward that dies on its own (pod deleted mid-forward) is dropped by a watcher; a global active-forwards panel lists local→pod mapping, context and uptime with one-click stop. Cleanup: exec sessions + forwards are per-context — a new `kube.Manager` switch observer tears down every session bound to another context on switch, and both registries are closed on graceful shutdown (`http.Server.Shutdown` doesn't drain hijacked WebSockets or close forward listeners). Guardrails (ADR-0005): exec upgrade and port-forward **start** live in the read-only mutation group → 403 before the upgrade / before dialing; list + stop stay usable (backend-local session state, not cluster mutation). New public `kube.Manager.RestConfigFor` (returns a copy) feeds the SPDY executor + port-forward dialer. Verified: `go test -race ./...` incl. envtest (all packages green); `fe-test` 134; lint/vet/gofmt/eslint/tsc clean; FE prod build embeds xterm; **real kind smoke** — exec into nginx (interactive shell, resize, command output, clean exit; delete pod mid-session → structured `exit code 137` close, no hang); port-forward nginx:80→loopback, `curl` through it (nginx welcome), list, stop→listener closed; read-only real-binary curl → exec 403, pf-start 403, pf-list 200.
-- Next expected: Sprint 7 — Config/networking/RBAC/storage + polish
-- ADRs touched this session: none (implements ADR-0006 exec-WebSocket + port-forward). Added `github.com/coder/websocket` (Go) and `@xterm/xterm` + `@xterm/addon-fit` (frontend) — all pre-declared in the CLAUDE.md tech stack (coder/websocket exec; xterm.js 5 terminal, Sprint 6), not new decisions. Added a lightweight switch-observer hook on `kube.Manager` (a dependency-free callback for per-context session teardown), an implementation detail under ADR-0006, not a locked-decision change.
+- Last work: Sprint 7 — Config/networking/RBAC/storage + polish [sprint]
+- Summary: Resource-appropriate views for config, networking, RBAC and storage, plus global search and a polish pass. **Secrets (7.1):** masking already enforced server-side (Sprint 5) at get/yaml/stream; the kind smoke surfaced a leak the envtest missed — `kubectl apply` records the full manifest (data included) in the `last-applied-configuration` annotation, which `maskSecretData` did not touch, so a Secret value survived the masked get/YAML despite `data` being redacted. Fixed: `maskSecretData` now also redacts that annotation (targeted, other annotations preserved); regression covered by a unit test + the sprint-7 envtest (which now seeds the annotation). ConfigMap/Secret detail views render data keys (long ConfigMap values collapsible; Secret values masked with per-key reveal-on-click). **List-column enrichment (7.1–7.4):** ADR-0003 keeps list columns server-side, so the generic engine now emits per-kind extra columns (`listRow.cells`, keyed by column id) for configmaps/secrets/services/ingresses/PVC/PV/storageclasses/serviceaccounts/roles/clusterroles/(cluster)rolebindings — computed in one central registry (`columns.go`) wired into both the REST list (`shapeList`) and the watch→SSE row shaper (`genericStreamRow`) so live updates carry the identical shape. Secret enrichment reads only key *counts* + type, never a value. The thin frontend renders any extra column via `ResourceRow.cells` (default table cell). **Services/Ingress (7.2):** typed Service detail endpoint `GET /api/v1/services/{ns}/{name}` resolves Endpoints into ready/not-ready backing addresses (each linked to its pod via targetRef — the Service's matching pod list); Ingress detail renders rules (host/path/backend) + TLS from the object, backends cross-linking to their Service, TLS to its Secret. **RBAC (7.3):** Role/ClusterRole rules table, RoleBinding/ClusterRoleBinding subjects + roleRef (linked to the referenced role; cluster vs namespaced routes), ServiceAccount secrets/imagePullSecrets — all from the object; nav separation is discovery-driven. **Storage (7.4):** PVC (status/capacity/access-modes/class/bound-PV linked), PV (reclaim/capacity/phase/claimRef linked), StorageClass (provisioner/default-marker) — PVC⇄PV cross-links; pending/unbound render a meaningful status. **Search + polish (7.5):** `GET /api/v1/search?q=&limit=` name-matches across the active context's discovered types (bounded ≤100, per-type-failure → warning for partial results, opaque high-volume kinds skipped); global-search UI (`/` focuses, arrow keys move selection, Enter/click navigates, Esc closes, debounced) + a shortcuts-help popover (`?`); shared `EmptyState`/`ErrorState` (ApiError code→title, retry action) replace the per-file copies across every list/detail. Verified: full `go test -race ./...` incl. envtest green; `fe-test` 172; lint/vet/gofmt/eslint/tsc clean; FE prod build embeds; **real kind smoke** — seeded ConfigMap/Secret/Service+Ingress/PVC/RBAC in a fresh namespace: masked get/YAML leak-count 0 (annotation fix), per-key reveal decodes; service detail resolves the backing pod endpoint; enriched columns correct for every kind; global search finds each object (secret value not leaked in results); empty namespace lists 0 rows; read-only DELETE → 403 while reveal → 200; browser-verified reveal-on-click, search navigate-on-select, Ingress→Service and Service→pod cross-links.
+- Next expected: Sprint 8 — Hardening & release
+- ADRs touched this session: none. No new dependencies, no architecture/locked-decision changes. The list-column enrichment applies ADR-0003's "list-column config lives server-side per resource" (adds a `cells` map to the existing row shape); the typed Service detail endpoint is an ADR-0003 hot-path handler; the Secret annotation masking is a fix within the ADR-0005 posture (no policy change).
 
 ## Sprint board
 
@@ -124,23 +124,23 @@
   - [x] Start/stop port-forward API
   - [x] Active forwards list
 
-### Sprint 7 — Config/networking/RBAC/storage + polish — [todo]
+### Sprint 7 — Config/networking/RBAC/storage + polish — [done]
 - Story 7.1 — ConfigMaps + Secrets (masked by default, reveal-on-click)
-  - [ ] ConfigMap views
-  - [ ] Secret views masked by default, reveal-on-click
+  - [x] ConfigMap views
+  - [x] Secret views masked by default, reveal-on-click (+ last-applied annotation leak fixed)
 - Story 7.2 — Services + Ingress views
-  - [ ] Service views
-  - [ ] Ingress views
+  - [x] Service views (typed detail: endpoints ready/not-ready → pod links)
+  - [x] Ingress views (rules + TLS, backend→service cross-links)
 - Story 7.3 — RBAC: Roles/ClusterRoles, Bindings, ServiceAccounts
-  - [ ] Roles/ClusterRoles + Bindings views
-  - [ ] ServiceAccount views
+  - [x] Roles/ClusterRoles + Bindings views (rules table, roleRef link)
+  - [x] ServiceAccount views
 - Story 7.4 — Storage: PV, PVC, StorageClass
-  - [ ] PV + PVC views
-  - [ ] StorageClass views
+  - [x] PV + PVC views (PVC⇄PV cross-links, meaningful pending status)
+  - [x] StorageClass views (provisioner + default marker)
 - Story 7.5 — Global search + empty/error states + keyboard nav
-  - [ ] Global search
-  - [ ] Empty/error states pass
-  - [ ] Keyboard navigation
+  - [x] Global search (name match across discovered types, bounded, partial-tolerant)
+  - [x] Empty/error states pass (shared EmptyState/ErrorState with retry)
+  - [x] Keyboard navigation (/ focus, arrows, Esc, ? help popover)
 
 ### Sprint 8 — Hardening & release — [todo]
 - Story 8.1 — Optional auth: basic-auth toggle (OIDC if time permits) via `KUBESCOPE_AUTH_MODE`

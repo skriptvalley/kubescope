@@ -1,14 +1,24 @@
-import { AlertCircle, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 
+import { ConfigMapDetail } from "@/components/configmap-detail";
 import { ControllerDetail } from "@/components/controller-detail";
 import { DeleteResourceButton } from "@/components/resource-actions";
+import { ErrorState } from "@/components/error-state";
 import { ExecTerminal } from "@/components/exec-terminal";
+import { IngressDetail } from "@/components/ingress-detail";
 import { LiveBadge } from "@/components/live-badge";
 import { LogViewer } from "@/components/log-viewer";
 import { PodDetail } from "@/components/pod-detail";
+import { BindingDetail, RoleDetail, ServiceAccountDetail } from "@/components/rbac-detail";
 import { SecretDetail } from "@/components/secret-detail";
+import { ServiceDetail } from "@/components/service-detail";
+import {
+  PersistentVolumeClaimDetail,
+  PersistentVolumeDetail,
+  StorageClassDetail,
+} from "@/components/storage-detail";
 import { YamlTab } from "@/components/yaml-tab";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -23,16 +33,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useReadOnly } from "@/hooks/use-config";
 import { useLiveResourceObject } from "@/hooks/use-stream";
 import { formatAge } from "@/lib/age";
-import { ApiError, type KubeObject, type ResourceRef } from "@/lib/api";
+import { type KubeObject } from "@/lib/api";
+import { detailKind, isSecret as isSecretRef } from "@/lib/resource-views";
 import { cn } from "@/lib/utils";
 import { workloadKind } from "@/lib/workloads";
 
 type Tab = "summary" | "logs" | "terminal" | "yaml";
-
-/** Whether a route points at the core Secret kind — its detail masks data. */
-function isSecretRef(ref: ResourceRef): boolean {
-  return ref.group === "core" && ref.version === "v1" && ref.resource === "secrets";
-}
 
 export function ResourceDetailPage() {
   const params = useParams();
@@ -48,6 +54,7 @@ export function ResourceDetailPage() {
   const workload = workloadKind({ group, version, resource });
   const isPod = workload?.kind === "Pod";
   const isSecret = isSecretRef(ref);
+  const detail = detailKind(ref);
   // Controller detail resolves its own data and never renders the raw object, so
   // skip the object fetch (and its stream) for those kinds — the YAML tab uses a
   // separate query.
@@ -127,17 +134,72 @@ export function ResourceDetailPage() {
         ) : object.isPending ? (
           <Skeleton className="h-40 w-full" data-testid="detail-loading" />
         ) : object.isError ? (
-          <DetailError error={object.error} />
-        ) : isSecret ? (
-          <SecretDetail object={object.data} namespace={namespace ?? ""} name={name} />
-        ) : workload ? (
-          <PodDetail object={object.data} namespace={namespace} name={name} />
+          <ErrorState
+            error={object.error}
+            onRetry={() => object.refetch()}
+            title="Failed to load object"
+          />
         ) : (
-          <Summary object={object.data} />
+          <TypedDetail
+            detail={detail}
+            object={object.data}
+            namespace={namespace}
+            name={name}
+            isWorkload={Boolean(workload)}
+          />
         )}
       </CardContent>
     </Card>
   );
+}
+
+/** Routes a resolved object to its typed detail view, falling back to the Pod
+ *  view for the Pod kind and the generic Summary for everything unregistered
+ *  (including CRDs). Rendered once the object has loaded. */
+function TypedDetail({
+  detail,
+  object,
+  namespace,
+  name,
+  isWorkload,
+}: {
+  detail: ReturnType<typeof detailKind>;
+  object: KubeObject;
+  namespace: string | undefined;
+  name: string;
+  isWorkload: boolean;
+}) {
+  switch (detail) {
+    case "configmap":
+      return <ConfigMapDetail object={object} />;
+    case "secret":
+      return <SecretDetail object={object} namespace={namespace ?? ""} name={name} />;
+    case "service":
+      return <ServiceDetail namespace={namespace ?? ""} name={name} />;
+    case "ingress":
+      return <IngressDetail object={object} namespace={namespace ?? ""} />;
+    case "role":
+    case "clusterrole":
+      return <RoleDetail object={object} />;
+    case "rolebinding":
+      return <BindingDetail object={object} namespace={namespace} />;
+    case "clusterrolebinding":
+      return <BindingDetail object={object} namespace={undefined} />;
+    case "serviceaccount":
+      return <ServiceAccountDetail object={object} namespace={namespace ?? ""} />;
+    case "persistentvolumeclaim":
+      return <PersistentVolumeClaimDetail object={object} />;
+    case "persistentvolume":
+      return <PersistentVolumeDetail object={object} />;
+    case "storageclass":
+      return <StorageClassDetail object={object} />;
+    default:
+      return isWorkload ? (
+        <PodDetail object={object} namespace={namespace} name={name} />
+      ) : (
+        <Summary object={object} />
+      );
+  }
 }
 
 function Summary({ object }: { object: KubeObject }) {
@@ -259,20 +321,3 @@ function TabButton({
   );
 }
 
-function DetailError({ error }: { error: Error }) {
-  const apiError = error instanceof ApiError ? error : undefined;
-  const title =
-    apiError?.code === "not_found"
-      ? "Not found"
-      : apiError?.code === "forbidden"
-        ? "Access denied"
-        : "Failed to load object";
-  const detail = apiError ? `${apiError.message} (${apiError.code})` : error.message;
-  return (
-    <Alert variant="destructive">
-      <AlertCircle className="h-4 w-4" />
-      <AlertTitle>{title}</AlertTitle>
-      <AlertDescription>{detail}</AlertDescription>
-    </Alert>
-  );
-}

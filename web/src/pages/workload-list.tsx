@@ -1,13 +1,14 @@
 import { type ColumnDef } from "@tanstack/react-table";
-import { AlertCircle, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { EmptyState } from "@/components/empty-state";
+import { ErrorState } from "@/components/error-state";
 import { LiveBadge } from "@/components/live-badge";
 import { NamespaceSelector } from "@/components/namespace-selector";
 import { DeleteRowButton } from "@/components/resource-actions";
 import { StatusBadge } from "@/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -23,7 +24,6 @@ import { useNamespaces } from "@/hooks/use-namespaces";
 import { useLiveWorkloadSummary } from "@/hooks/use-stream";
 import { formatAge } from "@/lib/age";
 import {
-  ApiError,
   type CronJobSummary,
   type DaemonSetSummary,
   type DeploymentSummary,
@@ -112,11 +112,13 @@ export function WorkloadListPage({
         {query.isPending ? (
           <ListSkeleton />
         ) : query.isError ? (
-          <ListError error={query.error} />
+          <ErrorState
+            error={query.error}
+            onRetry={() => query.refetch()}
+            title="Failed to load workloads"
+          />
         ) : query.data.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            No {resource} found{ns ? ` in namespace ${ns}` : ""}.
-          </p>
+          <EmptyState message={`No ${resource} found${ns ? ` in namespace ${ns}` : ""}.`} />
         ) : (
           <WorkloadTable
             columns={columns}
@@ -292,19 +294,5 @@ function ListSkeleton() {
         <Skeleton key={i} className="h-9 w-full" />
       ))}
     </div>
-  );
-}
-
-function ListError({ error }: { error: Error }) {
-  const apiError = error instanceof ApiError ? error : undefined;
-  const title =
-    apiError?.code === "unknown_workload" ? "Unknown workload" : "Failed to load workloads";
-  const detail = apiError ? `${apiError.message} (${apiError.code})` : error.message;
-  return (
-    <Alert variant="destructive">
-      <AlertCircle className="h-4 w-4" />
-      <AlertTitle>{title}</AlertTitle>
-      <AlertDescription>{detail}</AlertDescription>
-    </Alert>
   );
 }

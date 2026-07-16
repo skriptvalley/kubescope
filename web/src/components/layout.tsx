@@ -3,6 +3,8 @@ import { Outlet } from "react-router-dom";
 
 import { ActiveForwardsPanel } from "@/components/active-forwards-panel";
 import { ContextSwitcher } from "@/components/context-switcher";
+import { GlobalSearch } from "@/components/global-search";
+import { ShortcutsHelp } from "@/components/shortcuts-help";
 import { Sidebar } from "@/components/sidebar";
 import { useServerConfig } from "@/hooks/use-config";
 
@@ -10,9 +12,11 @@ export function Layout() {
   return (
     <div className="flex h-screen flex-col">
       <header className="shrink-0 border-b">
-        <div className="flex h-14 items-center gap-6 px-4">
+        <div className="flex h-14 items-center gap-4 px-4">
           <span className="text-lg font-semibold tracking-tight">Kubescope</span>
-          <div className="ml-auto">
+          <div className="ml-auto flex flex-1 items-center justify-end gap-3">
+            <GlobalSearch />
+            <ShortcutsHelp />
             <ContextSwitcher />
           </div>
         </div>

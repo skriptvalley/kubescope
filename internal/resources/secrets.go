@@ -22,6 +22,13 @@ import (
 // leaks — the key names are structural (and still shown) but the bytes are not.
 const secretRedaction = "**redacted**"
 
+// lastAppliedAnnotation is kubectl's record of the last applied manifest. For a
+// Secret created/updated via `kubectl apply` it contains a full copy of the
+// object — including its data (or stringData in plaintext) — so it must be
+// redacted alongside the data fields, or a Secret value leaks through the
+// annotation despite data being masked (ADR-0005).
+const lastAppliedAnnotation = "kubectl.kubernetes.io/last-applied-configuration"
+
 // secretsGVR is the core Secret resource. Masking keys off the GVR, not the
 // object's self-reported kind, so a mislabelled object cannot dodge masking.
 var secretsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
@@ -32,13 +39,23 @@ func isSecret(gvr schema.GroupVersionResource) bool {
 }
 
 // maskSecretData redacts every value under `data` and `stringData` in place,
-// preserving the keys. It is pure over the object map so it can be table-tested,
-// and is a no-op for a shape without those fields.
+// preserving the keys, and redacts the last-applied-configuration annotation
+// (which mirrors the whole object, data included). It is pure over the object
+// map so it can be table-tested, and is a no-op for a shape without those fields.
 func maskSecretData(obj map[string]any) {
 	for _, field := range []string{"data", "stringData"} {
 		if m, ok := obj[field].(map[string]any); ok {
 			for k := range m {
 				m[k] = secretRedaction
+			}
+		}
+	}
+	// The last-applied-configuration annotation embeds the full manifest, so a
+	// Secret's data survives there even once data/stringData are masked.
+	if meta, ok := obj["metadata"].(map[string]any); ok {
+		if anns, ok := meta["annotations"].(map[string]any); ok {
+			if _, ok := anns[lastAppliedAnnotation]; ok {
+				anns[lastAppliedAnnotation] = secretRedaction
 			}
 		}
 	}

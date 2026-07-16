@@ -54,4 +54,32 @@ describe("ResourceTable", () => {
     // Chronological order puts the middle timestamp (gamma, 07-12) in the middle.
     expect(dataRowNames()[1]).toBe("gamma");
   });
+
+  it("renders per-kind enrichment columns from row.cells", () => {
+    const enrichedColumns: ResourceColumn[] = [
+      { id: "name", header: "Name" },
+      { id: "type", header: "Type" },
+      { id: "ports", header: "Ports" },
+      { id: "age", header: "Age" },
+    ];
+    const enrichedRows: ResourceRow[] = [
+      { name: "web", creationTimestamp: "2026-07-12T10:00:00Z", cells: { type: "ClusterIP", ports: "80/TCP" } },
+      { name: "api", creationTimestamp: "2026-07-12T10:00:00Z", cells: { type: "NodePort", ports: "" } }, // empty → dash
+    ];
+    render(
+      <MemoryRouter>
+        <ResourceTable
+          columns={enrichedColumns}
+          rows={enrichedRows}
+          detailHref={(r) => `/detail/${r.name}`}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("ClusterIP")).toBeInTheDocument();
+    expect(screen.getByText("80/TCP")).toBeInTheDocument();
+    expect(screen.getByText("NodePort")).toBeInTheDocument();
+    // An empty cell renders a dash, not a blank column.
+    const apiRow = screen.getByRole("link", { name: "api" }).closest("tr")!;
+    expect(within(apiRow).getByText("—")).toBeInTheDocument();
+  });
 });

@@ -108,6 +108,14 @@ func New(opts Options) http.Handler {
 			// one key at a time on explicit action (ADR-0005). A read, so it is not
 			// gated by read-only mode.
 			v1.Get("/secrets/{namespace}/{name}/reveal", resources.RevealSecretHandler(opts.Kube, opts.Logger))
+			// Typed Service detail (Sprint 7): the Service summary plus its resolved
+			// Endpoints (ready/not-ready backing pods) — the hot-path complement to
+			// the generic object the detail view already fetches.
+			v1.Get("/services/{namespace}/{name}", resources.ServiceDetailHandler(opts.Kube, opts.Logger))
+			// Global search (Sprint 7): name matches across the active context's
+			// discovered types, bounded and partial-tolerant. Shares the discovery
+			// cache so it reuses the same GVR enumeration as the nav.
+			v1.Get("/search", resources.SearchHandler(opts.Kube, disco, opts.Logger))
 
 			// Port-forward list + stop (Sprint 6). Both manage backend-local
 			// session state — a loopback listener the user already started — not
