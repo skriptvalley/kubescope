@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,12 +24,14 @@ var podsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "p
 
 // fakeCluster serves one fake dynamic client for a fixed active context.
 type fakeCluster struct {
-	dyn     dynamic.Interface
-	context string
+	sourceGen atomic.Int64
+	dyn       dynamic.Interface
+	context   string
 }
 
 func (f *fakeCluster) ActiveContextName() (string, error)           { return f.context, nil }
 func (f *fakeCluster) DynamicFor(string) (dynamic.Interface, error) { return f.dyn, nil }
+func (f *fakeCluster) SourceGeneration() int64                      { return f.sourceGen.Load() }
 func (f *fakeCluster) ClassifyActiveError(err error) kube.Classification {
 	return kube.ClassifyError(err, kube.ClassifyHints{})
 }

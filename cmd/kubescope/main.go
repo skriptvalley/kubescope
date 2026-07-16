@@ -41,6 +41,13 @@ func run(logger *slog.Logger) error {
 	// session bound to another context, and shutdown tears down all of them.
 	execSessions := stream.NewExecRegistry()
 	portForwards := stream.NewPortForwardManager(mgr, logger)
+	// A runtime kubeconfig swap (ADR-0007) replaces the credential source
+	// entirely: every live session built on the old source is torn down. The
+	// stream/discovery layers handle themselves via the source generation.
+	mgr.SetSourceObserver(func() {
+		execSessions.CloseAll()
+		portForwards.CloseAll()
+	})
 	mgr.SetSwitchObserver(func(current string) {
 		execSessions.CloseOthers(current)
 		portForwards.CloseOthers(current)

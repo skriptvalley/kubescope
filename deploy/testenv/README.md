@@ -49,14 +49,16 @@ reach the kind apiservers:
   the container itself, so every cluster entry is rewritten to
   `host.docker.internal` and TLS verification is disabled (**local dev only** —
   the cluster cert does not cover that name). The image is published on
-  `-p 8080:8080`.
+  `-p 127.0.0.1:8080:8080` — loopback only, since no auth is configured.
   - Caveat: `host.docker.internal` only resolves to a live cluster **while that
     cluster exists**. Tear the clusters down (`down`) and Kubescope will show
     its starter / "cluster unreachable" states — the connectivity flow FB-6
     adds — rather than data.
 - **Linux** — `host.docker.internal` is not available, so the kubeconfig is left
   as-is and the container runs with `--network host` (Linux-only) plus
-  `KUBESCOPE_LISTEN_ADDR=0.0.0.0:8080` and no `-p`.
+  `KUBESCOPE_LISTEN_ADDR=127.0.0.1:8080` and no `-p` — under host networking,
+  container loopback is host loopback, and an unauthenticated dashboard must
+  never bind a LAN interface (ADR-0005).
 
 The credentials copy lives **only** in a `mktemp -d` directory removed by an
 `EXIT` trap; the docker path deliberately does not `exec`, so the trap still

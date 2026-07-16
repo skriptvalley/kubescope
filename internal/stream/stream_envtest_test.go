@@ -33,6 +33,7 @@ type envCluster struct{ dyn dynamic.Interface }
 
 func (e *envCluster) ActiveContextName() (string, error)           { return "env", nil }
 func (e *envCluster) DynamicFor(string) (dynamic.Interface, error) { return e.dyn, nil }
+func (e *envCluster) SourceGeneration() int64                      { return 0 }
 func (e *envCluster) ClassifyActiveError(err error) kube.Classification {
 	return kube.ClassifyError(err, kube.ClassifyHints{})
 }

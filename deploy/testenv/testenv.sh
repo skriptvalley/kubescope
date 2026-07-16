@@ -208,11 +208,14 @@ run_docker() {
     Linux)
       # Local kind apiservers advertise 127.0.0.1; --network host lets the
       # container reach them with the kubeconfig unchanged. --user keeps the
-      # bind-mounted copy readable by the nonroot image user.
+      # bind-mounted copy readable by the nonroot image user. Under host
+      # networking, container loopback IS host loopback — bind 127.0.0.1 so an
+      # unauthenticated, mutation-capable dashboard is never LAN-exposed
+      # (ADR-0005; the image's 0.0.0.0 default assumes an isolated netns).
       docker run --rm --network host \
         --user "$(id -u):$(id -g)" \
         -v "$tmpdir/kubeconfig:/kubeconfig:ro" \
-        -e KUBESCOPE_LISTEN_ADDR="0.0.0.0:8080" \
+        -e KUBESCOPE_LISTEN_ADDR="127.0.0.1:8080" \
         "$image"
       ;;
     Darwin|MINGW*|MSYS*)
@@ -224,7 +227,8 @@ run_docker() {
         -e 's#server: https://127.0.0.1:#server: https://host.docker.internal:#' \
         -e 's#certificate-authority-data:.*#insecure-skip-tls-verify: true#' \
         "$tmpdir/kubeconfig"
-      docker run --rm -p 8080:8080 \
+      # Publish on the host's loopback only — no auth is configured (ADR-0005).
+      docker run --rm -p 127.0.0.1:8080:8080 \
         -v "$tmpdir/kubeconfig:/kubeconfig:ro" \
         "$image"
       ;;

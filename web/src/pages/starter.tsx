@@ -196,7 +196,14 @@ function ContextChooser() {
   const healthByName = new Map((health ?? []).map((h) => [h.name, h]));
 
   return (
-    <ul className="divide-y rounded-md border" data-testid="context-chooser">
+    <div className="space-y-2">
+      {switchContext.isError && (
+        <p role="alert" className="text-xs text-destructive">
+          Switch failed:{" "}
+          {switchContext.error instanceof Error ? switchContext.error.message : "unknown error"}
+        </p>
+      )}
+      <ul className="divide-y rounded-md border" data-testid="context-chooser">
       {contexts.map((c) => {
         const badge = healthBadge(healthByName.get(c.name), healthPending);
         return (
@@ -220,7 +227,8 @@ function ContextChooser() {
           </li>
         );
       })}
-    </ul>
+      </ul>
+    </div>
   );
 }
 

@@ -108,7 +108,11 @@ func runSSE(w http.ResponseWriter, r *http.Request, flusher http.Flusher, logger
 			return
 		case <-ticker.C:
 			// Enforce ADR-0006: a stream bound to a now-inactive context closes.
-			if current, err := hub.cluster.ActiveContextName(); err != nil || current != sub.Context() {
+			// A runtime kubeconfig swap (ADR-0007) closes it too — the same
+			// context name may now mean a different cluster, so the client must
+			// resubscribe onto an informer built from the new source.
+			if current, err := hub.cluster.ActiveContextName(); err != nil || current != sub.Context() ||
+				hub.cluster.SourceGeneration() != sub.Generation() {
 				return
 			}
 			if _, err := w.Write(heartbeatComment); err != nil {

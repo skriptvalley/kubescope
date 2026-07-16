@@ -43,6 +43,10 @@ type Cluster interface {
 	// taxonomy so error envelopes carry a precise reason and remediation (FB-6).
 	ProbeContext(ctx context.Context, name string) kube.ContextHealth
 	ClassifyActiveError(err error) kube.Classification
+	// SourceGeneration increments on every runtime kubeconfig swap (ADR-0007);
+	// context-keyed caches fold it into their keys so a swap never serves data
+	// cached from the previous file's same-named context.
+	SourceGeneration() int64
 }
 
 // maxSwitchBodyBytes caps the context-switch request body; the payload is a
@@ -139,7 +143,10 @@ func HealthHandler(cluster Cluster, logger *slog.Logger, onHealth HealthObserver
 				fmt.Sprintf("cannot read kubeconfig: %v", err))
 			return
 		}
-		if onHealth != nil {
+		// A canceled request (client gone mid-probe) yields "context canceled"
+		// results that say nothing about the cluster — never sync those into
+		// the watch layer as an outage.
+		if onHealth != nil && r.Context().Err() == nil {
 			for _, h := range health {
 				onHealth(h)
 			}

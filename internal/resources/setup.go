@@ -153,7 +153,9 @@ func resolveSetupState(c Cluster, canSetKubeconfig bool, r *http.Request, onHeal
 	}
 
 	health := c.ProbeContext(r.Context(), active)
-	if onHealth != nil {
+	// A canceled request yields a "context canceled" probe result that says
+	// nothing about the cluster — never sync it into the watch layer.
+	if onHealth != nil && r.Context().Err() == nil {
 		onHealth(health)
 	}
 	if !health.Reachable || !health.AuthOK {

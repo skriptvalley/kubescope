@@ -134,3 +134,19 @@ describe("StarterPage", () => {
     expect(screen.getByTestId("set-kubeconfig-disabled")).toBeInTheDocument();
   });
 });
+
+describe("ContextChooser error feedback", () => {
+  it("surfaces a failed context switch instead of swallowing it", async () => {
+    const contexts: ContextInfo[] = [
+      { name: "prod", cluster: "c", namespace: "default", active: false },
+    ];
+    listMock.mockResolvedValue(contexts);
+    switchMock.mockRejectedValue(new ApiError("cannot switch context", "kubeconfig_unavailable", 503));
+    renderStarter(makeState({ state: "no_active_context" }));
+
+    fireEvent.click(await screen.findByText("prod"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/switch failed/i);
+    expect(screen.getByRole("alert")).toHaveTextContent(/cannot switch context/i);
+  });
+});

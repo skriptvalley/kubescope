@@ -218,3 +218,20 @@ describe("useLiveResourceObject", () => {
     await waitFor(() => expect(result.current.deleted).toBe(false));
   });
 });
+
+describe("scoped status reasons", () => {
+  it("a forbidden watch status stays scoped: exposed to the view, global banner untouched", async () => {
+    listMock.mockResolvedValue(oneRow);
+    const { result } = renderHook(() => useLiveResourceList(podsRef), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.data?.rows).toHaveLength(1));
+    act(() => FakeEventSource.latest().emitOpen());
+
+    emit({
+      type: "status",
+      status: { state: "unreachable", reason: "forbidden", guidance: "no RBAC for pods" },
+    });
+
+    await waitFor(() => expect(result.current.unreachable?.reason).toBe("forbidden"));
+    expect(connectivity.isActiveUnreachable()).toBe(false);
+  });
+});

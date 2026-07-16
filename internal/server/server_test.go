@@ -60,6 +60,7 @@ func (f *fakeProvider) ProbeContext(context.Context, string) kube.ContextHealth 
 	return kube.ContextHealth{Name: "test", Reachable: true, AuthOK: true, ServerVersion: "v1.33.0"}
 }
 
+func (f *fakeProvider) SourceGeneration() int64 { return 0 }
 func (f *fakeProvider) ClassifyActiveError(err error) kube.Classification {
 	return kube.ClassifyError(err, kube.ClassifyHints{})
 }

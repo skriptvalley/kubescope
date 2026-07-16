@@ -45,6 +45,7 @@ type fakeCluster struct {
 	probeHealth    kube.ContextHealth
 	setErr         error
 	setPath        string
+	sourceGen      int64
 }
 
 func (f *fakeCluster) Clientset() (kubernetes.Interface, error) { return f.clientset, f.clientsetErr }
@@ -69,6 +70,7 @@ func (f *fakeCluster) SetKubeconfigPath(path string) error {
 	return nil
 }
 func (f *fakeCluster) ProbeContext(context.Context, string) kube.ContextHealth { return f.probeHealth }
+func (f *fakeCluster) SourceGeneration() int64                                 { return f.sourceGen }
 func (f *fakeCluster) ClassifyActiveError(err error) kube.Classification {
 	return kube.ClassifyError(err, kube.ClassifyHints{ExecCommand: f.execCmd, LoopbackServer: f.loopback})
 }
@@ -225,4 +227,20 @@ func TestHealthHandlerNotifiesObserver(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, []string{"a", "b"}, seen)
+}
+
+// TestHealthHandlerSkipsObserverOnCanceledRequest pins the PR-review fix: a
+// probe run under an already-canceled request context says nothing about the
+// cluster, so it must never be synced into the watch layer as an outage.
+func TestHealthHandlerSkipsObserverOnCanceledRequest(t *testing.T) {
+	cluster := &fakeCluster{health: []kube.ContextHealth{{Name: "a", Error: "context canceled"}}}
+	notified := 0
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/contexts/health", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	rec := httptest.NewRecorder()
+	HealthHandler(cluster, discardLogger(), func(kube.ContextHealth) { notified++ })(rec, req.WithContext(ctx))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Zero(t, notified, "a canceled request's probe results must not reach the observer")
 }

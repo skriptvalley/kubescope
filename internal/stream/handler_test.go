@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 // switchableCluster lets a test flip the active context mid-stream to exercise
 // the context-switch teardown path.
 type switchableCluster struct {
+	gen atomic.Int64
 	dyn dynamic.Interface
 	mu  sync.Mutex
 	ctx string
@@ -36,6 +38,7 @@ func (c *switchableCluster) ActiveContextName() (string, error) {
 	return c.ctx, nil
 }
 func (c *switchableCluster) DynamicFor(string) (dynamic.Interface, error) { return c.dyn, nil }
+func (c *switchableCluster) SourceGeneration() int64                      { return c.gen.Load() }
 func (c *switchableCluster) ClassifyActiveError(err error) kube.Classification {
 	return kube.ClassifyError(err, kube.ClassifyHints{})
 }

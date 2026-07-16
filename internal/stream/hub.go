@@ -47,6 +47,10 @@ type Cluster interface {
 	ActiveContextName() (string, error)
 	DynamicFor(name string) (dynamic.Interface, error)
 	ClassifyActiveError(err error) kube.Classification
+	// SourceGeneration increments on every runtime kubeconfig swap (ADR-0007).
+	// Informers fold it into their key and streams close when it moves, so a
+	// swap never leaves a live view attached to the previous file's cluster.
+	SourceGeneration() int64
 }
 
 // Shaper turns a live object into the row a list/feed view renders. Injected so
@@ -97,7 +101,11 @@ type ObjectSanitizer func(schema.GroupVersionResource, *unstructured.Unstructure
 
 type hubKey struct {
 	context string
-	gvr     schema.GroupVersionResource
+	// gen is the kubeconfig-source generation the informer was built under.
+	// Context names recur across kubeconfig files, so without it a runtime
+	// source swap (ADR-0007) would keep serving the old file's cluster.
+	gen int64
+	gvr schema.GroupVersionResource
 }
 
 // HubOption tunes a Hub at construction (informer resync, subscriber buffer).
@@ -151,7 +159,7 @@ func (h *Hub) Subscribe(gvr schema.GroupVersionResource, filter Filter) (*Subscr
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	k := hubKey{context: ctxName, gvr: gvr}
+	k := hubKey{context: ctxName, gen: h.cluster.SourceGeneration(), gvr: gvr}
 	si := h.informers[k]
 	if si == nil {
 		dyn, err := h.cluster.DynamicFor(ctxName)
@@ -171,7 +179,7 @@ func (h *Hub) Subscribe(gvr schema.GroupVersionResource, filter Filter) (*Subscr
 	si.refs++
 	si.ensureStarted()
 
-	return &Subscription{hub: h, key: k, si: si, sub: sub, context: ctxName}, nil
+	return &Subscription{hub: h, key: k, si: si, sub: sub, context: ctxName, generation: k.gen}, nil
 }
 
 // activeInformers reports how many informers are live — teardown assertions.
@@ -218,12 +226,13 @@ func (h *Hub) SyncContextHealth(health kube.ContextHealth) {
 // add/update/delete; TakeResync() reports (and clears) a pending resync;
 // Close() releases the subscription exactly once.
 type Subscription struct {
-	hub       *Hub
-	key       hubKey
-	si        *sharedGVRInformer
-	sub       *subscriber
-	context   string
-	closeOnce sync.Once
+	hub        *Hub
+	key        hubKey
+	si         *sharedGVRInformer
+	sub        *subscriber
+	context    string
+	generation int64
+	closeOnce  sync.Once
 }
 
 // Events is the subscriber's event channel (add/update/delete).
@@ -242,6 +251,11 @@ func (s *Subscription) TakeStatus() *StatusInfo { return s.sub.status.Swap(nil) 
 // Context is the context name this subscription is bound to; the SSE handler
 // closes the stream when the active context moves off it.
 func (s *Subscription) Context() string { return s.context }
+
+// Generation is the kubeconfig-source generation this subscription was bound
+// under; the SSE handler closes the stream when a runtime source swap moves it
+// (the client resubscribes onto a fresh informer built from the new source).
+func (s *Subscription) Generation() int64 { return s.generation }
 
 // Close removes the subscriber and, if it was the last, stops and forgets the
 // informer.

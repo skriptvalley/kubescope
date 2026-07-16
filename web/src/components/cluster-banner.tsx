@@ -18,6 +18,10 @@ export function ClusterBanner() {
     connectivity.subscribe,
     connectivity.isActiveUnreachable,
   );
+  const everConnected = useSyncExternalStore(
+    connectivity.subscribe,
+    connectivity.hasEverConnected,
+  );
   const { data: contexts } = useContexts();
   const { data: health } = useContextsHealth();
 
@@ -27,6 +31,9 @@ export function ClusterBanner() {
     ? !(activeHealth.reachable && activeHealth.authOK)
     : false;
 
+  // Before the first successful connection the full-page starter owns the
+  // unreachable story; stacking the banner on top of it would be noise.
+  if (!everConnected) return null;
   if (!healthUnreachable && !storeUnreachable) return null;
 
   const reason = activeHealth?.reason;

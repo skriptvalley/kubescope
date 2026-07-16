@@ -200,6 +200,7 @@ func (c *swapCluster) DynamicFor(string) (dynamic.Interface, error) {
 	defer c.mu.Unlock()
 	return c.dyn, nil
 }
+func (c *swapCluster) SourceGeneration() int64 { return 0 }
 func (c *swapCluster) ClassifyActiveError(err error) kube.Classification {
 	return kube.ClassifyError(err, kube.ClassifyHints{})
 }
@@ -313,4 +314,28 @@ func TestHubSyncContextHealthMarksUnreachable(t *testing.T) {
 	}, 3*time.Second, 10*time.Millisecond)
 	require.Eventually(t, sub.TakeResync, 3*time.Second, 10*time.Millisecond)
 	assert.False(t, sub.si.isUnreachable())
+}
+
+// TestHubKeysInformersBySourceGeneration pins the runtime-kubeconfig-swap fix
+// (PR review): after a source swap, a subscription for the SAME context name
+// must get a fresh informer (new generation key), never the old file's one.
+func TestHubKeysInformersBySourceGeneration(t *testing.T) {
+	client := newFakeClient(t)
+	cluster := &fakeCluster{dyn: client, context: "ctx-a"}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	hub := NewHub(cluster, nameShaper, logger)
+
+	before, err := hub.Subscribe(podsGVR, Filter{})
+	require.NoError(t, err)
+	defer before.Close()
+
+	cluster.sourceGen.Store(1) // a kubeconfig swap happened
+
+	after, err := hub.Subscribe(podsGVR, Filter{})
+	require.NoError(t, err)
+	defer after.Close()
+
+	require.NotSame(t, before.si, after.si, "a new generation must build a fresh informer")
+	assert.EqualValues(t, 0, before.Generation())
+	assert.EqualValues(t, 1, after.Generation())
 }

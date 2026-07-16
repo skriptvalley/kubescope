@@ -46,6 +46,16 @@ type Manager struct {
 	active   string                   // in-memory override; "" = kubeconfig current-context
 	clients  map[string]*cachedClient // per-context cache of successful builds
 	onSwitch func(current string)     // notified after a context switch (nil = no observer)
+	// sourceGen counts kubeconfig-source swaps (ADR-0007). Context names are
+	// not globally unique across kubeconfig files, so every context-keyed cache
+	// (discovery, stream informers) folds this into its key — a swap then makes
+	// same-named contexts from the old file unreachable via cache keys instead
+	// of silently serving the old cluster's data.
+	sourceGen int64
+	// onSourceChange is notified after a successful SetKubeconfigPath; the
+	// wiring tears down live sessions (exec, port-forwards) whose credentials
+	// came from the previous source (nil = no observer).
+	onSourceChange func()
 }
 
 type cachedClient struct {
@@ -440,8 +450,34 @@ func (m *Manager) SetKubeconfigPath(path string) error {
 	m.kubeconfigPath = path
 	m.active = ""
 	m.clients = make(map[string]*cachedClient)
+	m.sourceGen++
+	obs := m.onSourceChange
 	m.mu.Unlock()
+	if obs != nil {
+		obs()
+	}
 	return nil
+}
+
+// SourceGeneration identifies the current kubeconfig source: it increments on
+// every successful SetKubeconfigPath. Context-keyed caches include it in their
+// keys so a source swap never serves data cached from the previous file's
+// same-named context.
+func (m *Manager) SourceGeneration() int64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sourceGen
+}
+
+// SetSourceObserver registers a callback invoked after every successful
+// SetKubeconfigPath. It lets the streaming layer tear down live sessions
+// (exec terminals, port-forwards) built on the previous source's credentials —
+// the source-swap analog of the context-switch observer. Set once at startup;
+// a nil fn clears it.
+func (m *Manager) SetSourceObserver(fn func()) {
+	m.mu.Lock()
+	m.onSourceChange = fn
+	m.mu.Unlock()
 }
 
 // hintsFor derives the classification hints for a context: the exec-plugin

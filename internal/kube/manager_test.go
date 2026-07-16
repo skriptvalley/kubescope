@@ -444,3 +444,30 @@ func TestProbeEvictsStaleCachedClient(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "v1.33.0", v.GitVersion)
 }
+
+// TestSetKubeconfigPathBumpsGenerationAndNotifies pins the source-swap contract
+// (ADR-0007 + PR review): a successful swap increments SourceGeneration (so
+// context-keyed caches key away from the old file's same-named contexts) and
+// fires the source observer (so live exec/port-forward sessions are torn down);
+// a failed swap does neither.
+func TestSetKubeconfigPathBumpsGenerationAndNotifies(t *testing.T) {
+	pathA := writeConfig(t, singleContextConfig(t, "alpha"))
+	pathB := writeConfig(t, singleContextConfig(t, "beta"))
+	m := NewManager(pathA)
+
+	fired := 0
+	m.SetSourceObserver(func() { fired++ })
+	require.EqualValues(t, 0, m.SourceGeneration())
+
+	require.Error(t, m.SetKubeconfigPath(filepath.Join(t.TempDir(), "missing")))
+	assert.EqualValues(t, 0, m.SourceGeneration(), "a failed swap must not bump the generation")
+	assert.Equal(t, 0, fired, "a failed swap must not notify")
+
+	require.NoError(t, m.SetKubeconfigPath(pathB))
+	assert.EqualValues(t, 1, m.SourceGeneration())
+	assert.Equal(t, 1, fired, "a successful swap notifies exactly once")
+
+	require.NoError(t, m.SetKubeconfigPath(pathA))
+	assert.EqualValues(t, 2, m.SourceGeneration())
+	assert.Equal(t, 2, fired)
+}

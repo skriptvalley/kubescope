@@ -53,23 +53,32 @@ type APIResourceInfo struct {
 type DiscoveryCluster interface {
 	ActiveContextName() (string, error)
 	DiscoveryFor(name string) (discovery.DiscoveryInterface, error)
+	SourceGeneration() int64
+}
+
+// discoveryKey identifies one cache entry: the context name plus the
+// kubeconfig-source generation it was fetched under (ADR-0007).
+type discoveryKey struct {
+	name string
+	gen  int64
 }
 
 // DiscoveryService enumerates API groups/resources per context and caches the
-// result. The cache is keyed by context name, so switching contexts uses a
-// separate entry and never returns another cluster's resources. An explicit
-// refresh re-fetches, so a CRD installed after startup appears without a
-// restart (ADR-0003).
+// result. The cache is keyed by context name + source generation, so switching
+// contexts — or swapping the kubeconfig source at runtime — uses a separate
+// entry and never returns another cluster's resources. An explicit refresh
+// re-fetches, so a CRD installed after startup appears without a restart
+// (ADR-0003).
 type DiscoveryService struct {
 	cluster DiscoveryCluster
 
 	mu    sync.RWMutex
-	cache map[string]DiscoveryResult
+	cache map[discoveryKey]DiscoveryResult
 }
 
 // NewDiscoveryService returns a discovery service backed by the given cluster.
 func NewDiscoveryService(cluster DiscoveryCluster) *DiscoveryService {
-	return &DiscoveryService{cluster: cluster, cache: make(map[string]DiscoveryResult)}
+	return &DiscoveryService{cluster: cluster, cache: make(map[discoveryKey]DiscoveryResult)}
 }
 
 // Get returns the discovery result for the active context, serving a cached
@@ -80,10 +89,14 @@ func (s *DiscoveryService) Get(refresh bool) (DiscoveryResult, error) {
 	if err != nil {
 		return DiscoveryResult{}, &kubeconfigError{err}
 	}
+	// The key carries the source generation: after a runtime kubeconfig swap
+	// (ADR-0007) a same-named context must not serve the old file's cached
+	// catalog. Old-generation entries are left behind (bounded by swap count).
+	key := discoveryKey{name: name, gen: s.cluster.SourceGeneration()}
 
 	if !refresh {
 		s.mu.RLock()
-		cached, ok := s.cache[name]
+		cached, ok := s.cache[key]
 		s.mu.RUnlock()
 		if ok {
 			return cached, nil
@@ -104,7 +117,7 @@ func (s *DiscoveryService) Get(refresh bool) (DiscoveryResult, error) {
 	}
 
 	s.mu.Lock()
-	s.cache[name] = result
+	s.cache[key] = result
 	s.mu.Unlock()
 	return result, nil
 }

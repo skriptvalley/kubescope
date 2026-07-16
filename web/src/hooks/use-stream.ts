@@ -26,6 +26,10 @@ export type { StreamStatus } from "@/lib/stream";
 const POLL_BASE_MS = 10_000;
 const POLL_MAX_MS = 60_000;
 
+/** Failure reasons scoped to one resource/credential rather than the whole
+ *  cluster: they must not raise the app-wide unreachable banner. */
+const SCOPED_REASONS = new Set(["forbidden", "auth_expired"]);
+
 /** Exported for unit tests. `fetchFailureCount` comes from the query's own state
  *  (`query.state.fetchFailureCount`); it resets to 0 on any successful fetch. */
 export function pollFor(status: StreamStatus, fetchFailureCount = 0): number | false {
@@ -68,7 +72,13 @@ function useWatchStream(
           if (!info) return;
           if (info.state === "unreachable") {
             setUnreachable(info);
-            connectivity.setActiveUnreachable(true);
+            // Only cluster-level failures flip the app-wide banner. A 403/401
+            // on ONE resource's watch is scoped to that resource (the FB-6
+            // matrix: "insufficient permissions for this resource, not a
+            // global failure") — the view's own error surface covers it.
+            if (!SCOPED_REASONS.has(info.reason ?? "")) {
+              connectivity.setActiveUnreachable(true);
+            }
           } else {
             setUnreachable(null);
             connectivity.setActiveUnreachable(false);
