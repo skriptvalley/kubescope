@@ -49,10 +49,16 @@ function buildColumnDefs(
           ),
         };
       default:
+        // Per-kind enrichment columns (Sprint 7): the server ships each extra
+        // column's value in row.cells keyed by the column id.
         return {
           id: col.id,
           header: col.header,
-          accessorFn: (row) => String((row as unknown as Record<string, unknown>)[col.id] ?? ""),
+          accessorFn: (row) => row.cells?.[col.id] ?? "",
+          cell: ({ getValue }) => {
+            const value = String(getValue() ?? "");
+            return <span className="text-muted-foreground">{value || "—"}</span>;
+          },
         };
     }
   });

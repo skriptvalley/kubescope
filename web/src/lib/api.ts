@@ -76,6 +76,9 @@ export interface ResourceRow {
   namespace?: string;
   creationTimestamp?: string;
   uid?: string;
+  /** Values for any per-kind enrichment columns, keyed by column id (Sprint 7).
+   *  The table reads a non-name/namespace/age column's value from here. */
+  cells?: Record<string, string>;
 }
 
 export interface ResourceList {
@@ -262,6 +265,72 @@ export interface EventFeedRow {
 
 interface WorkloadListResponse<T> {
   items: T[];
+}
+
+// --- Typed Service detail (Sprint 7) -----------------------------------------
+
+export interface ServicePortSummary {
+  name?: string;
+  port: number;
+  protocol: string;
+  targetPort?: string;
+  nodePort?: number;
+}
+
+/** Points a resolved endpoint address at the pod behind it (deep-link target). */
+export interface EndpointTargetRef {
+  kind: string;
+  namespace?: string;
+  name: string;
+}
+
+export interface EndpointAddressSummary {
+  ip: string;
+  hostname?: string;
+  nodeName?: string;
+  ready: boolean;
+  targetRef?: EndpointTargetRef;
+}
+
+/** A Service summary plus its resolved Endpoints (ready + not-ready backing
+ *  pods). The address lists are the Service's matching pod list, split by
+ *  readiness; each address links to its pod via targetRef. */
+export interface ServiceDetail {
+  name: string;
+  namespace: string;
+  type: string;
+  clusterIP?: string;
+  clusterIPs?: string[];
+  externalIPs?: string[];
+  sessionAffinity?: string;
+  selector?: Record<string, string>;
+  ports: ServicePortSummary[];
+  endpointsFound: boolean;
+  readyAddresses: EndpointAddressSummary[];
+  notReadyAddresses: EndpointAddressSummary[];
+}
+
+// --- Global search (Sprint 7) ------------------------------------------------
+
+/** One name match. `group` is the raw API group ("" for core); tokenize it with
+ *  groupToken() to build the resource route. */
+export interface SearchResult {
+  group: string;
+  version: string;
+  resource: string;
+  kind: string;
+  namespace?: string;
+  name: string;
+  namespaced: boolean;
+}
+
+export interface SearchResponse {
+  query: string;
+  results: SearchResult[];
+  /** More matches existed than the limit returned. */
+  truncated: boolean;
+  /** Types that failed to list — results are partial (degraded, not failed). */
+  warnings?: string[];
 }
 
 /** The URL token standing in for the empty core API group ("" is unusable in a path). */
@@ -463,6 +532,20 @@ export const api = {
           `/api/v1/secrets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/reveal?key=${encodeURIComponent(key)}`,
         )
       ).value,
+  },
+  services: {
+    /** A Service's summary + resolved Endpoints (ready/not-ready backing pods). */
+    detail: async (namespace: string, name: string): Promise<ServiceDetail> =>
+      request<ServiceDetail>(
+        `/api/v1/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+      ),
+  },
+  /** Name search across the active context's discovered types (bounded, partial-
+   *  tolerant). Navigates to the matched object's detail route on select. */
+  search: async (query: string, limit?: number): Promise<SearchResponse> => {
+    const params = new URLSearchParams({ q: query });
+    if (limit !== undefined) params.set("limit", String(limit));
+    return request<SearchResponse>(`/api/v1/search?${params.toString()}`);
   },
   workloads: {
     /** Typed summary list for one workload kind; T is the matching *Summary. */

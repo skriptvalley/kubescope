@@ -62,7 +62,9 @@ describe("NodesPage", () => {
     );
     renderPage();
 
-    expect(await screen.findByText(/failed to load nodes/i)).toBeInTheDocument();
+    // The shared error state prefers the code-specific title (more informative
+    // than a generic "failed to load"), then shows the message + code.
+    expect(await screen.findByText(/kubeconfig unavailable/i)).toBeInTheDocument();
     expect(
       screen.getByText(/cannot load kubeconfig \(kubeconfig_unavailable\)/i),
     ).toBeInTheDocument();

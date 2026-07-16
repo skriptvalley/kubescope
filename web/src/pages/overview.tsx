@@ -1,6 +1,7 @@
-import { AlertCircle, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { EmptyState } from "@/components/empty-state";
+import { ErrorState } from "@/components/error-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +13,6 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useOverview } from "@/hooks/use-overview";
-import { ApiError } from "@/lib/api";
 
 export function OverviewPage() {
   const { data, isPending, isError, error, refetch, isFetching } = useOverview();
@@ -41,7 +41,7 @@ export function OverviewPage() {
         {isPending ? (
           <OverviewSkeleton />
         ) : isError ? (
-          <OverviewError error={error} />
+          <ErrorState error={error} onRetry={() => refetch()} title="Cluster unreachable" />
         ) : (
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
@@ -52,7 +52,7 @@ export function OverviewPage() {
             <div className="space-y-2">
               <p className="text-sm font-medium">Namespaces</p>
               {data.namespaces.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No namespaces found.</p>
+                <EmptyState message="No namespaces found." />
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {data.namespaces.map((ns) => (
@@ -92,21 +92,3 @@ function OverviewSkeleton() {
   );
 }
 
-function OverviewError({ error }: { error: Error }) {
-  const apiError = error instanceof ApiError ? error : undefined;
-  const title =
-    apiError?.code === "kubeconfig_unavailable"
-      ? "Kubeconfig unavailable"
-      : "Cluster unreachable";
-  const detail = apiError ? `${apiError.message} (${apiError.code})` : error.message;
-  return (
-    <Alert variant="destructive">
-      <AlertCircle className="h-4 w-4" />
-      <AlertTitle>{title}</AlertTitle>
-      <AlertDescription className="space-y-2">
-        <p>{detail}</p>
-        {apiError?.guidance && <p className="font-medium">{apiError.guidance}</p>}
-      </AlertDescription>
-    </Alert>
-  );
-}

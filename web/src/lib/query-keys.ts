@@ -16,6 +16,9 @@ export const queryKeys = {
     ["workload-summary", resource, namespace ?? ""] as const,
   eventsFeed: (namespace?: string) => ["events-feed", namespace ?? ""] as const,
   portForwards: () => ["port-forwards"] as const,
+  serviceDetail: (namespace: string, name: string) =>
+    ["service-detail", namespace, name] as const,
+  search: (query: string) => ["search", query] as const,
 };
 
 /** Query-key prefixes whose data is scoped to a single cluster; dropped on
@@ -30,6 +33,10 @@ export const clusterScopedKeyPrefixes = [
   ["resource-yaml"],
   ["workload-summary"],
   ["events-feed"],
+  ["service-detail"],
+  // Search results are context-specific (they name objects in the active
+  // cluster), so drop them on a context switch.
+  ["search"],
   // Forwards are per-context and torn down server-side on a context switch, so
   // the list must refetch (the mounted panel) / drop (unmounted) on switch.
   ["port-forwards"],

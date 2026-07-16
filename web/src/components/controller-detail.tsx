@@ -1,17 +1,15 @@
 import { type ColumnDef } from "@tanstack/react-table";
-import { AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { ErrorState } from "@/components/error-state";
 import { EventsPanel } from "@/components/events-panel";
 import { RestartButton, ScaleControl } from "@/components/resource-actions";
 import { StatusBadge } from "@/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkloadTable } from "@/components/workload-table";
 import { useOwnedJobs, useOwnedPods, useWorkloadSummary } from "@/hooks/use-workloads";
 import { formatAge } from "@/lib/age";
 import {
-  ApiError,
   type CronJobSummary,
   type DaemonSetSummary,
   type DeploymentSummary,
@@ -90,7 +88,7 @@ export function ControllerDetail({
       {summary.isPending ? (
         <Skeleton className="h-20 w-full" data-testid="controller-summary-loading" />
       ) : summary.isError ? (
-        <LoadError what="status" error={summary.error} />
+        <LoadError what="status" error={summary.error} onRetry={() => summary.refetch()} />
       ) : row ? (
         <ReplicaStatus resource={resource} row={row} namespace={namespace} />
       ) : (
@@ -238,7 +236,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function OwnedPodsTable({ query }: { query: ReturnType<typeof useOwnedPods> }) {
   if (query.isPending) return <Skeleton className="h-16 w-full" data-testid="owned-pods-loading" />;
-  if (query.isError) return <LoadError what="pods" error={query.error} />;
+  if (query.isError) return <LoadError what="pods" error={query.error} onRetry={() => query.refetch()} />;
   if (query.data.length === 0)
     return <p className="text-sm text-muted-foreground">No pods owned by this controller.</p>;
   return <WorkloadTable<WorkloadSummary> columns={ownedPodColumns()} rows={query.data} />;
@@ -252,7 +250,7 @@ function OwnedJobsTable({
   namespace: string;
 }) {
   if (query.isPending) return <Skeleton className="h-16 w-full" data-testid="owned-jobs-loading" />;
-  if (query.isError) return <LoadError what="jobs" error={query.error} />;
+  if (query.isError) return <LoadError what="jobs" error={query.error} onRetry={() => query.refetch()} />;
   if (query.data.length === 0)
     return <p className="text-sm text-muted-foreground">No jobs for this cron job yet.</p>;
   return <WorkloadTable<WorkloadSummary> columns={ownedJobColumns(namespace)} rows={query.data} />;
@@ -334,14 +332,6 @@ function ownedJobColumns(namespace: string): ColumnDef<WorkloadSummary>[] {
   ];
 }
 
-function LoadError({ what, error }: { what: string; error: Error }) {
-  const apiError = error instanceof ApiError ? error : undefined;
-  const detail = apiError ? `${apiError.message} (${apiError.code})` : error.message;
-  return (
-    <Alert variant="destructive">
-      <AlertCircle className="h-4 w-4" />
-      <AlertTitle>Failed to load {what}</AlertTitle>
-      <AlertDescription>{detail}</AlertDescription>
-    </Alert>
-  );
+function LoadError({ what, error, onRetry }: { what: string; error: Error; onRetry?: () => void }) {
+  return <ErrorState error={error} onRetry={onRetry} title={`Failed to load ${what}`} />;
 }

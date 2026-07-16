@@ -1,12 +1,13 @@
-import { AlertCircle, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useCallback } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
+import { EmptyState } from "@/components/empty-state";
+import { ErrorState } from "@/components/error-state";
 import { LiveBadge } from "@/components/live-badge";
 import { NamespaceSelector } from "@/components/namespace-selector";
 import { DeleteRowButton } from "@/components/resource-actions";
 import { ResourceTable } from "@/components/resource-table";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -20,7 +21,7 @@ import { useReadOnly } from "@/hooks/use-config";
 import { useDiscovery } from "@/hooks/use-discovery";
 import { useNamespaces } from "@/hooks/use-namespaces";
 import { useLiveResourceList } from "@/hooks/use-stream";
-import { ApiError, type ResourceRow } from "@/lib/api";
+import { type ResourceRow } from "@/lib/api";
 import { findResource } from "@/lib/discovery-nav";
 import { workloadKind } from "@/lib/workloads";
 import { WorkloadListPage } from "@/pages/workload-list";
@@ -140,11 +141,13 @@ function GenericResourceListPage() {
         {list.isPending ? (
           <ListSkeleton />
         ) : list.isError ? (
-          <ListError error={list.error} />
+          <ErrorState
+            error={list.error}
+            onRetry={() => list.refetch()}
+            title="Failed to load resources"
+          />
         ) : list.data.rows.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            No {resource} found{namespaced && ns ? ` in namespace ${ns}` : ""}.
-          </p>
+          <EmptyState message={`No ${resource} found${namespaced && ns ? ` in namespace ${ns}` : ""}.`} />
         ) : (
           <ResourceTable
             columns={list.data.columns}
@@ -165,23 +168,5 @@ function ListSkeleton() {
         <Skeleton key={i} className="h-9 w-full" />
       ))}
     </div>
-  );
-}
-
-function ListError({ error }: { error: Error }) {
-  const apiError = error instanceof ApiError ? error : undefined;
-  const title =
-    apiError?.code === "unknown_resource"
-      ? "Unknown resource"
-      : apiError?.code === "invalid_scope"
-        ? "Invalid namespace scope"
-        : "Failed to load resources";
-  const detail = apiError ? `${apiError.message} (${apiError.code})` : error.message;
-  return (
-    <Alert variant="destructive">
-      <AlertCircle className="h-4 w-4" />
-      <AlertTitle>{title}</AlertTitle>
-      <AlertDescription>{detail}</AlertDescription>
-    </Alert>
   );
 }

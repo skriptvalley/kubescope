@@ -48,6 +48,28 @@ func TestMaskSecretData(t *testing.T) {
 	assert.Equal(t, secretRedaction, obj["stringData"].(map[string]any)["token"])
 }
 
+func TestMaskSecretDataRedactsLastAppliedAnnotation(t *testing.T) {
+	// `kubectl apply` records the full manifest — data included — in this
+	// annotation, so it must be redacted alongside the data fields (ADR-0005).
+	leak := `{"apiVersion":"v1","kind":"Secret","stringData":{"password":"hunter2"}}`
+	obj := map[string]any{
+		"kind": "Secret",
+		"metadata": map[string]any{
+			"annotations": map[string]any{
+				lastAppliedAnnotation:   leak,
+				"kubescope.io/harmless": "keep-me",
+			},
+		},
+		"data": map[string]any{"password": "aHVudGVyMg=="},
+	}
+	maskSecretData(obj)
+
+	anns := obj["metadata"].(map[string]any)["annotations"].(map[string]any)
+	assert.Equal(t, secretRedaction, anns[lastAppliedAnnotation], "the last-applied annotation is redacted")
+	assert.NotContains(t, anns[lastAppliedAnnotation], "hunter2")
+	assert.Equal(t, "keep-me", anns["kubescope.io/harmless"], "other annotations are preserved")
+}
+
 func TestMaskSecretDataNonSecretShape(t *testing.T) {
 	obj := map[string]any{"kind": "ConfigMap", "data": map[string]any{"key": "value"}}
 	// A ConfigMap is never routed through masking, but the pure function must not

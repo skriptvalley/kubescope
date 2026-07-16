@@ -109,7 +109,7 @@ func ShapeStreamRow(gvr schema.GroupVersionResource, u *unstructured.Unstructure
 			return shapeEventFeedRow(&e)
 		}
 	}
-	return genericStreamRow(u)
+	return genericStreamRow(gvr, u)
 }
 
 // IsWorkloadStreamGVR reports whether a GVR is one of the seven typed workload
@@ -125,8 +125,15 @@ func IsWorkloadStreamGVR(gvr schema.GroupVersionResource) bool {
 
 // genericStreamRow is the same metadata row shapeList emits, built from an
 // unstructured object so any GVR (incl. CRDs) can stream into a generic list.
-func genericStreamRow(u *unstructured.Unstructured) listRow {
-	row := listRow{Name: u.GetName(), Namespace: u.GetNamespace(), UID: string(u.GetUID())}
+// It applies the same per-kind column enrichment as the REST list so a live
+// update carries the identical row shape the initial list painted (Sprint 7).
+func genericStreamRow(gvr schema.GroupVersionResource, u *unstructured.Unstructured) listRow {
+	row := listRow{
+		Name:      u.GetName(),
+		Namespace: u.GetNamespace(),
+		UID:       string(u.GetUID()),
+		Cells:     enrichRow(enrichmentFor(gvr), u),
+	}
 	if ts := u.GetCreationTimestamp(); !ts.IsZero() {
 		row.CreationTimestamp = ts.UTC().Format(time.RFC3339)
 	}

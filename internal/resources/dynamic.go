@@ -23,12 +23,15 @@ type listColumn struct {
 }
 
 // listRow is one shaped row. creationTimestamp backs the age column so the
-// frontend can both format a relative age and sort by it client-side.
+// frontend can both format a relative age and sort by it client-side. Cells
+// carries the values for any per-kind enrichment columns (Sprint 7), keyed by
+// column id; the frontend reads each extra column's value from it.
 type listRow struct {
-	Name              string `json:"name"`
-	Namespace         string `json:"namespace,omitempty"`
-	CreationTimestamp string `json:"creationTimestamp,omitempty"`
-	UID               string `json:"uid,omitempty"`
+	Name              string            `json:"name"`
+	Namespace         string            `json:"namespace,omitempty"`
+	CreationTimestamp string            `json:"creationTimestamp,omitempty"`
+	UID               string            `json:"uid,omitempty"`
+	Cells             map[string]string `json:"cells,omitempty"`
 }
 
 type listResponse struct {
@@ -194,18 +197,24 @@ func parseGVR(group, version, resource string) schema.GroupVersionResource {
 }
 
 // shapeList builds the server-side column config and rows. Namespaced kinds get
-// a namespace column; cluster-scoped kinds omit it.
+// a namespace column; cluster-scoped kinds omit it. Well-known kinds gain extra
+// kind-appropriate columns between namespace and age (Sprint 7 enrichment).
 func shapeList(info APIResourceInfo, list *unstructured.UnstructuredList) listResponse {
+	specs := enrichmentFor(schema.GroupVersionResource{Group: info.Group, Version: info.Version, Resource: info.Resource})
+
 	columns := []listColumn{{ID: "name", Header: "Name"}}
 	if info.Namespaced {
 		columns = append(columns, listColumn{ID: "namespace", Header: "Namespace"})
+	}
+	for _, c := range specs {
+		columns = append(columns, listColumn{ID: c.id, Header: c.header})
 	}
 	columns = append(columns, listColumn{ID: "age", Header: "Age"})
 
 	rows := make([]listRow, 0, len(list.Items))
 	for i := range list.Items {
 		item := &list.Items[i]
-		row := listRow{Name: item.GetName(), UID: string(item.GetUID())}
+		row := listRow{Name: item.GetName(), UID: string(item.GetUID()), Cells: enrichRow(specs, item)}
 		if info.Namespaced {
 			row.Namespace = item.GetNamespace()
 		}

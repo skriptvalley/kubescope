@@ -18,11 +18,12 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-// A non-workload kind exercises the generic Summary tab; workload kinds (Pod,
-// Deployment, …) render their dedicated views tested elsewhere.
+// An unregistered kind (a CRD) exercises the generic Summary tab; workload kinds
+// and the Sprint 7 config/networking/RBAC/storage kinds render dedicated views
+// tested elsewhere.
 const configmap: KubeObject = {
-  apiVersion: "v1",
-  kind: "ConfigMap",
+  apiVersion: "example.com/v1",
+  kind: "Widget",
   metadata: {
     name: "app-config",
     namespace: "default",
@@ -33,7 +34,7 @@ const configmap: KubeObject = {
   },
 };
 
-function renderDetail(route = "/resources/core/v1/configmaps/default/app-config") {
+function renderDetail(route = "/resources/example.com/v1/widgets/default/app-config") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -65,7 +66,7 @@ describe("ResourceDetailPage", () => {
     // immediately, so key on a field that only appears once metadata arrives).
     expect(await screen.findByText("app=web")).toBeInTheDocument();
     expect(screen.getByText("app-config")).toBeInTheDocument(); // title
-    expect(screen.getAllByText(/ConfigMap/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Widget/).length).toBeGreaterThan(0);
     expect(screen.getByText("kubescope.io/note")).toBeInTheDocument();
     expect(screen.getByText("CustomResource/owner-abc")).toBeInTheDocument();
   });
