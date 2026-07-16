@@ -48,6 +48,7 @@ A localhost-bound, writable Kubescope is reachable by a **DNS-rebinding** page: 
 
 - **Allowlist** = loopback names (`localhost`, `127.0.0.1`, `::1`) plus the concrete configured bind host, matched with or without a port. `/healthz` is exempt so probes are never rejected on Host grounds.
 - **Wildcard binds** (`0.0.0.0` / `::` — the Docker image default, a deliberate "expose me" choice) have no enumerable hostname, so the guard is a pass-through in that mode; the operative protection there is `basic` auth + network controls. An empty request Host is allowed (non-browser clients, which rebinding cannot exploit, and which the loopback bind already fences).
+- **Reverse-proxy caveat.** A proxy fronting the *loopback binary* connects to `127.0.0.1` but by default forwards the client's public `Host`, which the allowlist rejects. Operators must either set the proxy to send `Host: localhost` (e.g. nginx `proxy_set_header Host localhost;`) or bind Kubescope to a concrete address the proxy targets. Documented in the README rather than solved with a new allowed-hosts config var, keeping the canonical env set small; a configurable allowlist is a candidate if proxy deployments become common.
 
 ## Consequences
 

@@ -21,7 +21,7 @@ Kubescope acts with the **full power of whatever credentials your kubeconfig car
 - The **bare binary binds `127.0.0.1:8080`** (localhost only) by default. The **Docker image binds `0.0.0.0:8080`** because the container's network namespace is the isolation boundary; the published port (`-p 8080:8080`) is what makes it reachable, so scope that publish carefully (e.g. `-p 127.0.0.1:8080:8080` to keep it on the host's loopback).
 - **Read-only mode** (`KUBESCOPE_READ_ONLY=true`) rejects **all** mutating operations server-side — a good default for shared or demo instances.
 - **Secret values** are masked by default in every view; revealing a value is an explicit per-key action. Secret data is never written to logs.
-- A **Host-header allowlist** protects localhost/loopback binds against DNS-rebinding. See [ADR-0005](docs/adr/0005-security-posture-read-only-and-secret-masking.md).
+- A **Host-header allowlist** protects localhost/loopback binds against DNS-rebinding: requests whose `Host` is neither a loopback name nor the configured bind address are rejected. If you front the loopback binary with a **reverse proxy**, configure the proxy to send `Host: localhost` (e.g. nginx `proxy_set_header Host localhost;`) or bind Kubescope to a concrete address the proxy targets — otherwise the proxied public hostname is rejected. Wildcard binds (`0.0.0.0`, the image default) skip this check. See [ADR-0005](docs/adr/0005-security-posture-read-only-and-secret-masking.md).
 
 See [ADR-0005](docs/adr/0005-security-posture-read-only-and-secret-masking.md) for the full security posture.
 
