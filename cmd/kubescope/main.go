@@ -47,15 +47,18 @@ func run(logger *slog.Logger) error {
 	})
 
 	handler := server.New(server.Options{
-		Logger:       logger,
-		Kube:         mgr,
-		Stream:       mgr,
-		Exec:         mgr,
-		ExecSessions: execSessions,
-		PortForwards: portForwards,
-		ReadOnly:     cfg.ReadOnly,
-		AuthMode:     cfg.AuthMode,
-		Dist:         web.Dist(),
+		Logger:            logger,
+		Kube:              mgr,
+		Stream:            mgr,
+		Exec:              mgr,
+		ExecSessions:      execSessions,
+		PortForwards:      portForwards,
+		ReadOnly:          cfg.ReadOnly,
+		AuthMode:          cfg.AuthMode,
+		BasicAuthUsername: cfg.BasicAuthUsername,
+		BasicAuthPassword: cfg.BasicAuthPassword,
+		ListenAddr:        cfg.ListenAddr,
+		Dist:              web.Dist(),
 	})
 
 	httpServer := &http.Server{
