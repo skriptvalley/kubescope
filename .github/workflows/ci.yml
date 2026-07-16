@@ -1,0 +1,83 @@
+name: CI
+
+# Lint, unit tests (Go + frontend), and the embedded-SPA binary build. Runs on
+# every PR and on pushes to main so the trunk stays releasable (Sprint 8).
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer push to the same ref cancels the in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (Go + frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: make lint
+
+  test:
+    name: Go unit tests + envtest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # make test resolves envtest apiserver/etcd binaries via `go tool
+      # setup-envtest` and runs the suite under the race detector.
+      - run: make test
+
+  fe-test:
+    name: Frontend unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: make fe-test
+
+  build:
+    name: Build binary (embedded SPA)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # Builds the production SPA and compiles the single binary that embeds it —
+      # the release artifact shape (ADR-0002).
+      - run: make build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kubescope-binary
+          path: bin/kubescope
+          if-no-files-found: error
+          retention-days: 7
