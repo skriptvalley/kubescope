@@ -18,17 +18,49 @@ No Helm or other tools are required.
 ## Usage
 
 ```sh
-deploy/testenv/testenv.sh up       # create clusters + apply resources
-deploy/testenv/testenv.sh run      # build + run kubescope against it (:8080)
-deploy/testenv/testenv.sh status   # list clusters + workloads
-deploy/testenv/testenv.sh down     # delete both clusters
-deploy/testenv/testenv.sh check    # verify required tools (add --install to fix)
+deploy/testenv/testenv.sh up              # create clusters + apply resources
+deploy/testenv/testenv.sh run             # build + run kubescope (native) against it (:8080)
+deploy/testenv/testenv.sh run --docker    # ...or run the container image instead
+deploy/testenv/testenv.sh status          # list clusters + workloads
+deploy/testenv/testenv.sh down            # delete both clusters
+deploy/testenv/testenv.sh check           # verify required tools (add --install to fix)
 ```
 
-Or via Make: `make testenv-up`, `make testenv-status`, `make testenv-down`.
+Or via Make: `make testenv-up`, `make testenv-run`, `make testenv-run-docker`,
+`make testenv-status`, `make testenv-down`.
 
 `up` is idempotent — re-running it re-applies the manifests and repairs the
 kubeconfig without recreating existing clusters.
+
+## Running natively vs. in Docker
+
+`run` builds and execs the native `bin/kubescope` binary against the isolated
+kubeconfig — the simplest path, and the apiserver at `127.0.0.1` is reachable
+directly. Pass `--build` to force a rebuild first.
+
+`run --docker` runs the published container image instead
+(`KUBESCOPE_IMAGE`, default `ghcr.io/skriptvalley/kubescope:latest`; pass
+`--build` to `make docker-build` it first — otherwise the image must already be
+present locally, or the script tells you to build it). The kubeconfig is copied
+into a throwaway temp dir and adapted per OS so the containerised process can
+reach the kind apiservers:
+
+- **macOS / Windows** — kind advertises `127.0.0.1`, which inside a container is
+  the container itself, so every cluster entry is rewritten to
+  `host.docker.internal` and TLS verification is disabled (**local dev only** —
+  the cluster cert does not cover that name). The image is published on
+  `-p 8080:8080`.
+  - Caveat: `host.docker.internal` only resolves to a live cluster **while that
+    cluster exists**. Tear the clusters down (`down`) and Kubescope will show
+    its starter / "cluster unreachable" states — the connectivity flow FB-6
+    adds — rather than data.
+- **Linux** — `host.docker.internal` is not available, so the kubeconfig is left
+  as-is and the container runs with `--network host` (Linux-only) plus
+  `KUBESCOPE_LISTEN_ADDR=0.0.0.0:8080` and no `-p`.
+
+The credentials copy lives **only** in a `mktemp -d` directory removed by an
+`EXIT` trap; the docker path deliberately does not `exec`, so the trap still
+fires after the container stops.
 
 ## What gets created
 

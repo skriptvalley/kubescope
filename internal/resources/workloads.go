@@ -159,7 +159,7 @@ func WorkloadListHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc 
 		case resourcePods:
 			list, err := clientset.CoreV1().Pods(namespace).List(ctx, opts)
 			if err != nil {
-				writeUnreachable(w, logger, "listing pods", err, execGuidanceFor(cluster))
+				writeEngineError(w, logger, "listing pods", err, classifierFor(cluster))
 				return
 			}
 			items := make([]PodSummary, 0, len(list.Items))
@@ -170,7 +170,7 @@ func WorkloadListHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc 
 		case resourceDeployments:
 			list, err := clientset.AppsV1().Deployments(namespace).List(ctx, opts)
 			if err != nil {
-				writeUnreachable(w, logger, "listing deployments", err, execGuidanceFor(cluster))
+				writeEngineError(w, logger, "listing deployments", err, classifierFor(cluster))
 				return
 			}
 			items := make([]DeploymentSummary, 0, len(list.Items))
@@ -181,7 +181,7 @@ func WorkloadListHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc 
 		case resourceStatefulSets:
 			list, err := clientset.AppsV1().StatefulSets(namespace).List(ctx, opts)
 			if err != nil {
-				writeUnreachable(w, logger, "listing statefulsets", err, execGuidanceFor(cluster))
+				writeEngineError(w, logger, "listing statefulsets", err, classifierFor(cluster))
 				return
 			}
 			items := make([]StatefulSetSummary, 0, len(list.Items))
@@ -192,7 +192,7 @@ func WorkloadListHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc 
 		case resourceDaemonSets:
 			list, err := clientset.AppsV1().DaemonSets(namespace).List(ctx, opts)
 			if err != nil {
-				writeUnreachable(w, logger, "listing daemonsets", err, execGuidanceFor(cluster))
+				writeEngineError(w, logger, "listing daemonsets", err, classifierFor(cluster))
 				return
 			}
 			items := make([]DaemonSetSummary, 0, len(list.Items))
@@ -203,7 +203,7 @@ func WorkloadListHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc 
 		case resourceReplicaSets:
 			list, err := clientset.AppsV1().ReplicaSets(namespace).List(ctx, opts)
 			if err != nil {
-				writeUnreachable(w, logger, "listing replicasets", err, execGuidanceFor(cluster))
+				writeEngineError(w, logger, "listing replicasets", err, classifierFor(cluster))
 				return
 			}
 			items := make([]ReplicaSetSummary, 0, len(list.Items))
@@ -214,7 +214,7 @@ func WorkloadListHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc 
 		case resourceJobs:
 			list, err := clientset.BatchV1().Jobs(namespace).List(ctx, opts)
 			if err != nil {
-				writeUnreachable(w, logger, "listing jobs", err, execGuidanceFor(cluster))
+				writeEngineError(w, logger, "listing jobs", err, classifierFor(cluster))
 				return
 			}
 			items := make([]JobSummary, 0, len(list.Items))
@@ -225,7 +225,7 @@ func WorkloadListHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc 
 		case resourceCronJobs:
 			list, err := clientset.BatchV1().CronJobs(namespace).List(ctx, opts)
 			if err != nil {
-				writeUnreachable(w, logger, "listing cronjobs", err, execGuidanceFor(cluster))
+				writeEngineError(w, logger, "listing cronjobs", err, classifierFor(cluster))
 				return
 			}
 			items := make([]CronJobSummary, 0, len(list.Items))

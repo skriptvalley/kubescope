@@ -71,7 +71,7 @@ func TestOverviewHandler(t *testing.T) {
 		assert.Equal(t, "kubeconfig_unavailable", errorCode(t, rec.Body.Bytes()))
 	})
 
-	t.Run("unreachable cluster is structured 502", func(t *testing.T) {
+	t.Run("connection refused is classified 502 connection_refused", func(t *testing.T) {
 		cs := clusterWithVersion(t, "v1.33.0")
 		cs.(*fake.Clientset).PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, errors.New("connection refused")
@@ -81,7 +81,7 @@ func TestOverviewHandler(t *testing.T) {
 		OverviewHandler(cluster, discardLogger())(rec, httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil))
 
 		assert.Equal(t, http.StatusBadGateway, rec.Code)
-		assert.Equal(t, "cluster_unreachable", errorCode(t, rec.Body.Bytes()))
+		assert.Equal(t, "connection_refused", errorCode(t, rec.Body.Bytes()))
 	})
 
 	t.Run("exec-plugin failure carries ADR-0004 guidance", func(t *testing.T) {
@@ -89,7 +89,7 @@ func TestOverviewHandler(t *testing.T) {
 		cs.(*fake.Clientset).PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, errors.New(`exec: "aws": executable file not found in $PATH`)
 		})
-		cluster := &fakeCluster{active: "eks", clientset: cs, execGuidance: "mount ~/.aws — see ADR-0004"}
+		cluster := &fakeCluster{active: "eks", clientset: cs, execCmd: "aws"}
 		rec := httptest.NewRecorder()
 		OverviewHandler(cluster, discardLogger())(rec, httptest.NewRequest(http.MethodGet, "/api/v1/overview", nil))
 

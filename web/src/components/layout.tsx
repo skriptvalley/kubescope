@@ -1,12 +1,17 @@
 import { Lock } from "lucide-react";
+import { useSyncExternalStore } from "react";
 import { Outlet } from "react-router-dom";
 
 import { ActiveForwardsPanel } from "@/components/active-forwards-panel";
+import { ClusterBanner } from "@/components/cluster-banner";
 import { ContextSwitcher } from "@/components/context-switcher";
 import { GlobalSearch } from "@/components/global-search";
 import { ShortcutsHelp } from "@/components/shortcuts-help";
 import { Sidebar } from "@/components/sidebar";
 import { useServerConfig } from "@/hooks/use-config";
+import { useSetupState } from "@/hooks/use-setup";
+import { connectivity } from "@/lib/connectivity";
+import { StarterPage } from "@/pages/starter";
 
 export function Layout() {
   return (
@@ -22,15 +27,44 @@ export function Layout() {
         </div>
       </header>
       <ReadOnlyBanner />
+      <ClusterBanner />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main className="min-w-0 flex-1 overflow-y-auto px-6 py-6">
-          <Outlet />
+          <SetupGate />
         </main>
       </div>
       <ActiveForwardsPanel />
     </div>
   );
+}
+
+/** Renders the full-page starter instead of the routed page when the server has
+ *  no usable cluster (FB-6). The first three states always gate; an unreachable
+ *  active context only gates before the first successful connection — once
+ *  connected, a later outage is handled in-app by ClusterBanner, not the starter.
+ *  While setup is still loading (nothing cached) the routed page renders and
+ *  shows its own skeleton/error. */
+function SetupGate() {
+  const { data } = useSetupState();
+  const everConnected = useSyncExternalStore(
+    connectivity.subscribe,
+    connectivity.hasEverConnected,
+  );
+
+  if (data) {
+    const { state } = data;
+    if (
+      state === "no_kubeconfig" ||
+      state === "no_contexts" ||
+      state === "no_active_context" ||
+      (state === "active_unreachable" && !everConnected)
+    ) {
+      return <StarterPage state={data} />;
+    }
+  }
+
+  return <Outlet />;
 }
 
 /** A persistent notice when the server runs in read-only mode, so the absence of

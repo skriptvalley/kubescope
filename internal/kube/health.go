@@ -2,37 +2,30 @@ package kube
 
 import (
 	"fmt"
-	"strings"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
 // classify turns a probe error into a ContextHealth (Name is set by the
-// caller). A rejected-credentials error means the server was reachable but
-// refused us; anything else (connection refused, DNS, TLS, a missing exec
-// plugin) leaves the context unreachable. Exec-plugin contexts additionally
-// carry the ADR-0004 guidance so users get a fix, not a raw error.
-func classify(err error, usesExec bool, cmd string) ContextHealth {
-	h := ContextHealth{Error: err.Error()}
-	if apierrors.IsUnauthorized(err) || apierrors.IsForbidden(err) || isAuthString(err.Error()) {
+// caller) by sorting it through the shared failure taxonomy. A rejected-
+// credentials error (auth_expired/forbidden) means the server was reachable but
+// refused us; every other class leaves the context unreachable. The
+// classification's reason code, remediation and doc link are surfaced on the
+// ContextHealth so the UI can act on them.
+func classify(err error, hints ClassifyHints) ContextHealth {
+	cls := ClassifyError(err, hints)
+	h := ContextHealth{
+		Error:    err.Error(),
+		Reason:   string(cls.Class),
+		Guidance: cls.Remediation,
+		DocURL:   cls.DocURL,
+	}
+	switch cls.Class {
+	case FailAuthExpired, FailForbidden:
 		h.Reachable = true
 		h.AuthOK = false
 	}
-	if usesExec {
-		h.Guidance = execGuidance(cmd)
-	}
 	return h
-}
-
-// isAuthString is a fallback for auth failures that don't arrive as a typed
-// Kubernetes status error (e.g. surfaced through the exec/transport layer).
-func isAuthString(msg string) bool {
-	l := strings.ToLower(msg)
-	return strings.Contains(l, "unauthorized") ||
-		strings.Contains(l, "forbidden") ||
-		strings.Contains(l, " 401") ||
-		strings.Contains(l, " 403")
 }
 
 // ExecGuidance returns the ADR-0004 exec-plugin guidance for the named context

@@ -67,6 +67,25 @@ describe("api.nodes.list", () => {
     expect(err.guidance).toBe("mount ~/.aws — see ADR-0004");
   });
 
+  it("carries the docURL from the error envelope", async () => {
+    stubFetch({
+      ok: false,
+      status: 502,
+      json: async () => ({
+        error: {
+          code: "tls_cert",
+          message: "x509: certificate signed by unknown authority",
+          guidance: "mount the cluster CA",
+          docURL: "https://example/adr-0004",
+        },
+      }),
+    });
+
+    const err = (await api.overview().catch((e: unknown) => e)) as ApiError;
+    expect(err.code).toBe("tls_cert");
+    expect(err.docURL).toBe("https://example/adr-0004");
+  });
+
   it("throws a generic ApiError when the error body is not JSON", async () => {
     stubFetch({
       ok: false,
@@ -117,6 +136,41 @@ describe("api.contexts", () => {
         method: "POST",
         body: JSON.stringify({ name: "dev" }),
       }),
+    );
+  });
+});
+
+describe("api.setup", () => {
+  it("fetches the setup state", async () => {
+    const fetchStub = stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        state: "ready",
+        kubeconfigPath: "/kubeconfig",
+        activeContext: "prod",
+        canSetKubeconfig: true,
+      }),
+    });
+
+    const state = await api.setup.state();
+    expect(state.state).toBe("ready");
+    expect(state.activeContext).toBe("prod");
+    expect(fetchStub).toHaveBeenCalledWith("/api/v1/setup", expect.anything());
+  });
+
+  it("PUTs the path when repointing the kubeconfig and returns the fresh state", async () => {
+    const fetchStub = stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({ state: "ready", kubeconfigPath: "/other", canSetKubeconfig: true }),
+    });
+
+    const state = await api.setup.setKubeconfig("/other");
+    expect(state.kubeconfigPath).toBe("/other");
+    expect(fetchStub).toHaveBeenCalledWith(
+      "/api/v1/kubeconfig",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ path: "/other" }) }),
     );
   });
 });

@@ -61,6 +61,7 @@ All configuration is via `KUBESCOPE_`-prefixed environment variables:
 | `KUBESCOPE_AUTH_MODE` | `none` | `none` \| `basic` \| `oidc` (see Authentication). |
 | `KUBESCOPE_AUTH_BASIC_USERNAME` | — | Basic-auth username. Required when `KUBESCOPE_AUTH_MODE=basic`. |
 | `KUBESCOPE_AUTH_BASIC_PASSWORD` | — | Basic-auth password. Required when `KUBESCOPE_AUTH_MODE=basic`. Never logged. |
+| `KUBESCOPE_ALLOW_KUBECONFIG_SET` | `false` | When `true`, enables `PUT /api/v1/kubeconfig` so the UI can repoint Kubescope at another kubeconfig **path** at runtime (path must be readable by the process — in Docker, a mounted volume). Always rejected in read-only mode; the override is in-memory and a restart reverts to the configured path. See [ADR-0007](docs/adr/0007-runtime-kubeconfig-source.md). |
 
 ## Connecting to clusters
 
@@ -70,6 +71,12 @@ Kubescope parses the mounted kubeconfig, enumerates its contexts, and builds a c
 - **exec-plugin auth (EKS `aws eks get-token`, GKE `gke-gcloud-auth-plugin`)** spawns a host CLI that the slim image does not contain. Either bundle the CLI + mount cloud creds, or pre-generate a token on the host and mount a token-based kubeconfig (tokens expire — refresh manually). Kubescope surfaces a clear per-context error when the plugin binary is missing.
 - **File-path cert/key/CA references** in a kubeconfig resolve to host paths the container can't see. Mount each referenced file at the **same path** the kubeconfig names (extra `-v` flags).
 - **Port-forwarding** binds the forwarded pod port to `127.0.0.1` **inside** the container. To reach it from the host, publish that port too (e.g. `-p 15000:15000`) and start the forward with a matching fixed **local port**. `--network host` (Linux) sidesteps this.
+
+### First run and failure states
+
+Kubescope never dead-ends on a cluster problem. With no kubeconfig (or an empty/broken one) it starts anyway and shows a **guided setup page** instead of an error, and every connectivity failure is classified — connection refused, DNS, TLS, missing exec plugin, expired auth, RBAC denial, timeout, API-server error — with an inline fix suggestion and a doc link at the point of failure. If the active cluster goes away while you're viewing it (e.g. `kind delete cluster`), live views show an unreachable banner, polling backs off, and everything resumes automatically when the cluster returns; switching to a healthy context always works in the meantime.
+
+To point a running instance at a different kubeconfig from the UI, start it with `KUBESCOPE_ALLOW_KUBECONFIG_SET=true` (see Configuration).
 
 ## Status
 
@@ -94,7 +101,7 @@ Run `make help` for all targets (build, lint, docker-build, kind-up, smoke, …)
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, components, data flows |
 | [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) | Sprint plan (0–8) and v2 backlog |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |
-| [docs/adr/](docs/adr/) | Architecture decision records (0001–0006) |
+| [docs/adr/](docs/adr/) | Architecture decision records (0001–0007) |
 
 ## License
 

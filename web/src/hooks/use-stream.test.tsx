@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { KubeObject, ResourceList } from "@/lib/api";
+import { connectivity } from "@/lib/connectivity";
 import { FakeEventSource, installFakeEventSource } from "@/test/fake-event-source";
 
 import { useLiveResourceList, useLiveResourceObject, useLiveWorkloadSummary } from "./use-stream";
@@ -43,9 +44,22 @@ beforeEach(() => {
   getMock.mockReset();
   workloadsListMock.mockReset();
 });
-afterEach(() => restore());
+afterEach(() => {
+  restore();
+  connectivity.resetForTests();
+});
 
 const podsRef = { group: "core", version: "v1", resource: "pods", namespace: "default" };
+
+const oneRow: ResourceList = {
+  group: "core",
+  version: "v1",
+  resource: "pods",
+  kind: "Pod",
+  namespaced: true,
+  columns: [],
+  rows: [{ name: "a", namespace: "default", uid: "a-uid" }],
+};
 
 describe("useLiveResourceList", () => {
   it("patches rows in place on add/update/delete without refetching", async () => {
@@ -125,6 +139,43 @@ describe("useLiveWorkloadSummary", () => {
     emit({ type: "delete", ref: { name: "web-1", namespace: "default" } });
     await waitFor(() => expect(result.current.data?.map((r) => r.name)).toEqual(["web-2"]));
     expect(workloadsListMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("connectivity status events", () => {
+  it("exposes an unreachable StatusInfo and flips the connectivity store", async () => {
+    listMock.mockResolvedValue(oneRow);
+    const { result } = renderHook(() => useLiveResourceList(podsRef), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.data?.rows).toHaveLength(1));
+    act(() => FakeEventSource.latest().emitOpen());
+    expect(connectivity.isActiveUnreachable()).toBe(false);
+
+    emit({
+      type: "status",
+      status: { state: "unreachable", reason: "connection_refused", guidance: "cluster down" },
+    });
+
+    await waitFor(() => expect(result.current.unreachable?.reason).toBe("connection_refused"));
+    expect(result.current.unreachable?.guidance).toBe("cluster down");
+    expect(connectivity.isActiveUnreachable()).toBe(true);
+  });
+
+  it("clears the status and refetches a baseline on a connected event", async () => {
+    listMock.mockResolvedValue(oneRow);
+    const { result } = renderHook(() => useLiveResourceList(podsRef), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.data?.rows).toHaveLength(1));
+    act(() => FakeEventSource.latest().emitOpen());
+    expect(listMock).toHaveBeenCalledTimes(1);
+
+    emit({ type: "status", status: { state: "unreachable", reason: "dns" } });
+    await waitFor(() => expect(result.current.unreachable).not.toBeNull());
+    expect(connectivity.isActiveUnreachable()).toBe(true);
+
+    emit({ type: "status", status: { state: "connected" } });
+    await waitFor(() => expect(result.current.unreachable).toBeNull());
+    expect(connectivity.isActiveUnreachable()).toBe(false);
+    // Recovery invalidates the baseline → a clean refetch covers the gap.
+    await waitFor(() => expect(listMock).toHaveBeenCalledTimes(2));
   });
 });
 

@@ -52,6 +52,18 @@ func (f *fakeProvider) DiscoveryFor(string) (discovery.DiscoveryInterface, error
 	return f.clientset.Discovery(), f.err
 }
 
+func (f *fakeProvider) KubeconfigPath() string { return "/kubeconfig" }
+
+func (f *fakeProvider) SetKubeconfigPath(string) error { return f.err }
+
+func (f *fakeProvider) ProbeContext(context.Context, string) kube.ContextHealth {
+	return kube.ContextHealth{Name: "test", Reachable: true, AuthOK: true, ServerVersion: "v1.33.0"}
+}
+
+func (f *fakeProvider) ClassifyActiveError(err error) kube.Classification {
+	return kube.ClassifyError(err, kube.ClassifyHints{})
+}
+
 // ClientsetFor / RestConfigFor let fakeProvider satisfy stream.ExecCluster and
 // stream.PortForwardCluster so the exec + port-forward routes register in tests.
 func (f *fakeProvider) ClientsetFor(string) (kubernetes.Interface, error) {

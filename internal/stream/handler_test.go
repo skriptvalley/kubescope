@@ -18,6 +18,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/skriptvalley/kubescope/internal/kube"
 )
 
 // switchableCluster lets a test flip the active context mid-stream to exercise
@@ -34,6 +36,9 @@ func (c *switchableCluster) ActiveContextName() (string, error) {
 	return c.ctx, nil
 }
 func (c *switchableCluster) DynamicFor(string) (dynamic.Interface, error) { return c.dyn, nil }
+func (c *switchableCluster) ClassifyActiveError(err error) kube.Classification {
+	return kube.ClassifyError(err, kube.ClassifyHints{})
+}
 func (c *switchableCluster) switchTo(name string) {
 	c.mu.Lock()
 	c.ctx = name
@@ -253,4 +258,7 @@ type fakeLogCluster struct{ cs kubernetes.Interface }
 func (f *fakeLogCluster) ActiveContextName() (string, error) { return "ctx", nil }
 func (f *fakeLogCluster) ClientsetFor(string) (kubernetes.Interface, error) {
 	return f.cs, nil
+}
+func (f *fakeLogCluster) ClassifyActiveError(err error) kube.Classification {
+	return kube.ClassifyError(err, kube.ClassifyHints{})
 }

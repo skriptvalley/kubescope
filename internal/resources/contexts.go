@@ -33,6 +33,16 @@ type Cluster interface {
 	// and the fetched client cannot diverge under a concurrent switch.
 	Dynamic() (dynamic.Interface, error)
 	DiscoveryFor(name string) (discovery.DiscoveryInterface, error)
+	// KubeconfigPath and SetKubeconfigPath expose the runtime kubeconfig source
+	// (ADR-0007): setup state reports the path, and the set-kubeconfig endpoint
+	// repoints the Manager at a validated file.
+	KubeconfigPath() string
+	SetKubeconfigPath(path string) error
+	// ProbeContext probes one named context's connectivity for the setup-state
+	// resolver; ClassifyActiveError sorts a cluster-side error into the failure
+	// taxonomy so error envelopes carry a precise reason and remediation (FB-6).
+	ProbeContext(ctx context.Context, name string) kube.ContextHealth
+	ClassifyActiveError(err error) kube.Classification
 }
 
 // maxSwitchBodyBytes caps the context-switch request body; the payload is a
@@ -42,6 +52,12 @@ const maxSwitchBodyBytes = 64 << 10
 type contextList struct {
 	Items []kube.ContextInfo `json:"items"`
 }
+
+// HealthObserver receives each fresh context-probe result. The server wires it
+// to the stream hub so a failed probe marks that context's watch informers
+// unreachable — a silently dead TCP watch may never error on its own (FB-6
+// Story D). Nil disables the notification.
+type HealthObserver = func(kube.ContextHealth)
 
 type healthList struct {
 	Items []kube.ContextHealth `json:"items"`
@@ -114,7 +130,7 @@ func SwitchContextHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc
 // HealthHandler serves GET /api/v1/contexts/health: a concurrent reachability /
 // auth / server-version probe per context. Exec-plugin failures carry ADR-0004
 // guidance instead of a raw error.
-func HealthHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
+func HealthHandler(cluster Cluster, logger *slog.Logger, onHealth HealthObserver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		health, err := cluster.ProbeAll(r.Context())
 		if err != nil {
@@ -122,6 +138,11 @@ func HealthHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 			writeError(w, logger, http.StatusServiceUnavailable, "kubeconfig_unavailable",
 				fmt.Sprintf("cannot read kubeconfig: %v", err))
 			return
+		}
+		if onHealth != nil {
+			for _, h := range health {
+				onHealth(h)
+			}
 		}
 		writeJSON(w, logger, http.StatusOK, healthList{Items: health})
 	}

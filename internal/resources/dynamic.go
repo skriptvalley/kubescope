@@ -61,7 +61,7 @@ func ListHandler(cluster Cluster, disco *DiscoveryService, logger *slog.Logger) 
 		gvr := gvrFromRequest(r)
 		info, ok, err := disco.Resolve(gvr)
 		if err != nil {
-			writeEngineError(w, logger, "resolving resource", err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, "resolving resource", err, classifierFor(cluster))
 			return
 		}
 		if !ok {
@@ -90,7 +90,7 @@ func ListHandler(cluster Cluster, disco *DiscoveryService, logger *slog.Logger) 
 			list, err = ri.List(r.Context(), metav1.ListOptions{})
 		}
 		if err != nil {
-			writeEngineError(w, logger, fmt.Sprintf("listing %s", gvr.Resource), err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, fmt.Sprintf("listing %s", gvr.Resource), err, classifierFor(cluster))
 			return
 		}
 
@@ -144,7 +144,7 @@ func fetchObject(w http.ResponseWriter, r *http.Request, cluster Cluster, disco 
 
 	info, ok, err := disco.Resolve(gvr)
 	if err != nil {
-		writeEngineError(w, logger, "resolving resource", err, execGuidanceFor(cluster))
+		writeEngineError(w, logger, "resolving resource", err, classifierFor(cluster))
 		return nil, true
 	}
 	if !ok {
@@ -177,7 +177,7 @@ func fetchObject(w http.ResponseWriter, r *http.Request, cluster Cluster, disco 
 		obj, err = ri.Get(r.Context(), name, metav1.GetOptions{})
 	}
 	if err != nil {
-		writeEngineError(w, logger, fmt.Sprintf("getting %s %q", gvr.Resource, name), err, execGuidanceFor(cluster))
+		writeEngineError(w, logger, fmt.Sprintf("getting %s %q", gvr.Resource, name), err, classifierFor(cluster))
 		return nil, true
 	}
 	return obj, false

@@ -17,6 +17,10 @@ const (
 	EnvKubeconfig = "KUBESCOPE_KUBECONFIG"
 	EnvReadOnly   = "KUBESCOPE_READ_ONLY"
 	EnvAuthMode   = "KUBESCOPE_AUTH_MODE"
+	// EnvAllowKubeconfigSet gates the runtime set-kubeconfig endpoint (ADR-0007);
+	// default false, so a running Kubescope cannot be repointed at another
+	// kubeconfig unless explicitly enabled.
+	EnvAllowKubeconfigSet = "KUBESCOPE_ALLOW_KUBECONFIG_SET"
 	// Basic-auth credential source (Sprint 8, ADR-0005). Only consulted when
 	// KUBESCOPE_AUTH_MODE=basic; both are required in that mode. A single
 	// operator/password pair is the v1 credential model — see ADR-0005.
@@ -51,6 +55,9 @@ type Config struct {
 	// AuthMode is "basic". Empty in every other mode. Never logged.
 	BasicAuthUsername string
 	BasicAuthPassword string
+	// AllowKubeconfigSet enables the runtime set-kubeconfig endpoint (ADR-0007);
+	// default false.
+	AllowKubeconfigSet bool
 }
 
 type deps struct {
@@ -104,6 +111,14 @@ func Load(opts ...Option) (Config, error) {
 		}
 	}
 
+	allowKubeconfigSet := false
+	if raw, ok := d.lookupEnv(EnvAllowKubeconfigSet); ok {
+		allowKubeconfigSet, err = strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("parsing %s=%q: must be a boolean", EnvAllowKubeconfigSet, raw)
+		}
+	}
+
 	authMode := defaultAuthMode
 	if raw, ok := d.lookupEnv(EnvAuthMode); ok {
 		if !validAuthModes[raw] {
@@ -130,12 +145,13 @@ func Load(opts ...Option) (Config, error) {
 	}
 
 	return Config{
-		ListenAddr:        listenAddr,
-		KubeconfigPath:    kubeconfigPath,
-		ReadOnly:          readOnly,
-		AuthMode:          authMode,
-		BasicAuthUsername: basicUser,
-		BasicAuthPassword: basicPass,
+		ListenAddr:         listenAddr,
+		KubeconfigPath:     kubeconfigPath,
+		ReadOnly:           readOnly,
+		AuthMode:           authMode,
+		BasicAuthUsername:  basicUser,
+		BasicAuthPassword:  basicPass,
+		AllowKubeconfigSet: allowKubeconfigSet,
 	}, nil
 }
 

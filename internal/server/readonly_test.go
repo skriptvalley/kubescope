@@ -28,6 +28,9 @@ var mutatingRoutes = []struct {
 	path   string
 	body   string
 }{
+	// Repointing the kubeconfig source (ADR-0007) is a server-state mutation, so
+	// read-only mode 403s it before the AllowKubeconfigSet flag is even consulted.
+	{"set-kubeconfig", http.MethodPut, "/api/v1/kubeconfig", `{"path":"/tmp/kubeconfig"}`},
 	{"apply", http.MethodPut, "/api/v1/resources/apps/v1/deployments/nginx?namespace=default", `{"yaml":"kind: Deployment"}`},
 	{"delete", http.MethodDelete, "/api/v1/resources/apps/v1/deployments/nginx?namespace=default", ""},
 	{"scale", http.MethodPost, "/api/v1/workloads/deployments/default/nginx/scale", `{"replicas":3}`},
@@ -53,7 +56,11 @@ func readOnlyServer(readOnly bool) http.Handler {
 		ExecSessions: stream.NewExecRegistry(),
 		PortForwards: stream.NewPortForwardManager(provider, logger),
 		ReadOnly:     readOnly,
-		Dist:         fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("spa")}},
+		// Enabled so the writable-mode pass-through test reaches the set-kubeconfig
+		// handler (it 403s on the flag, not the read-only guard, when disabled);
+		// in read-only mode the guard still 403s it first.
+		AllowKubeconfigSet: true,
+		Dist:               fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("spa")}},
 	})
 }
 
@@ -120,6 +127,51 @@ func TestConfigEndpointReflectsReadOnly(t *testing.T) {
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &cfg))
 		assert.Equal(t, ro, cfg.ReadOnly)
 	}
+}
+
+// TestSetupEndpointUnguardedAndReflectsPosture verifies the setup endpoint is
+// reachable without the read-only guard (the UI gate depends on it) and that
+// canSetKubeconfig is reported false whenever read-only is on — read-only mode
+// keeps the runtime set-kubeconfig control off even when the flag is enabled.
+func TestSetupEndpointUnguardedAndReflectsPosture(t *testing.T) {
+	for _, ro := range []bool{true, false} {
+		srv := readOnlyServer(ro)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/setup", nil))
+		require.Equal(t, http.StatusOK, rec.Code, "setup is always reachable")
+
+		var st struct {
+			State            string `json:"state"`
+			CanSetKubeconfig bool   `json:"canSetKubeconfig"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &st))
+		// AllowKubeconfigSet is true in readOnlyServer, so the flag is gated only
+		// by read-only mode here.
+		assert.Equal(t, !ro, st.CanSetKubeconfig)
+	}
+}
+
+// TestSetKubeconfigFlagOffIs403 verifies the runtime set-kubeconfig endpoint
+// 403s on its own flag when reached in writable mode with the flag disabled —
+// the read-only guard passes it through, and the handler's own gate stops it.
+func TestSetKubeconfigFlagOffIs403(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	provider := &fakeProvider{clientset: fake.NewClientset()}
+	srv := New(Options{
+		Logger:             logger,
+		Kube:               provider,
+		ReadOnly:           false,
+		AllowKubeconfigSet: false,
+		Dist:               fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("spa")}},
+	})
+	rec := doMutation(t, srv, http.MethodPut, "/api/v1/kubeconfig", `{"path":"/new/kubeconfig"}`)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+	var env struct {
+		Error struct{ Code string } `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+	assert.Equal(t, "kubeconfig_set_disabled", env.Error.Code)
 }
 
 // TestContextSwitchNotGatedByReadOnly guards the classification boundary: the

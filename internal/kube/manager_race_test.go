@@ -62,3 +62,49 @@ func TestManagerConcurrentAccess(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cs)
 }
+
+// TestManagerConcurrentKubeconfigSwap races SetKubeconfigPath against readers
+// (Contexts / ClientsetFor) to prove the mutex-guarded source path and client
+// cache reset are concurrency-safe. Run with `go test -race`.
+func TestManagerConcurrentKubeconfigSwap(t *testing.T) {
+	ca := testCACert(t)
+	newFile := func(ctxName string) string {
+		return writeConfig(t, clientcmdapi.Config{
+			Clusters:       map[string]*clientcmdapi.Cluster{"c": {Server: "https://127.0.0.1:6443", CertificateAuthorityData: ca}},
+			AuthInfos:      map[string]*clientcmdapi.AuthInfo{"u": {Token: "t"}},
+			Contexts:       map[string]*clientcmdapi.Context{ctxName: {Cluster: "c", AuthInfo: "u"}},
+			CurrentContext: ctxName,
+		})
+	}
+	pathA := newFile("alpha")
+	pathB := newFile("beta")
+	m := NewManager(pathA)
+
+	const workers = 16
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for w := 0; w < workers; w++ {
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < 40; i++ {
+				switch (w + i) % 4 {
+				case 0:
+					_ = m.SetKubeconfigPath(pathA)
+				case 1:
+					_ = m.SetKubeconfigPath(pathB)
+				case 2:
+					_, _ = m.Contexts()
+				case 3:
+					_ = m.KubeconfigPath()
+					_, _ = m.ClientsetFor("alpha")
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+
+	// The source ends at one of the two valid files and still serves contexts.
+	require.Contains(t, []string{pathA, pathB}, m.KubeconfigPath())
+	_, err := m.Contexts()
+	require.NoError(t, err)
+}

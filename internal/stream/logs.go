@@ -17,6 +17,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/skriptvalley/kubescope/internal/kube"
 )
 
 // logLineBuffer sizes the reader→writer channel; a burst of log lines queues
@@ -24,10 +26,12 @@ import (
 const logLineBuffer = 256
 
 // LogCluster is the slice of the kube manager the log handler needs: a typed
-// clientset for the active context to open the pod-log stream.
+// clientset for the active context to open the pod-log stream, and a classifier
+// so a failed open surfaces a typed reason and remediation (FB-6).
 type LogCluster interface {
 	ActiveContextName() (string, error)
 	ClientsetFor(name string) (kubernetes.Interface, error)
+	ClassifyActiveError(err error) kube.Classification
 }
 
 // logLine is the SSE payload for one streamed log line.
@@ -75,8 +79,9 @@ func LogsHandler(cluster LogCluster, logger *slog.Logger, opts ...HandlerOption)
 
 		body, err := clientset.CoreV1().Pods(namespace).GetLogs(name, logOpts).Stream(r.Context())
 		if err != nil {
-			status, code := logErrorStatus(err)
-			writeStreamError(w, logger, status, code, fmt.Sprintf("opening logs for %s/%s: %v", namespace, name, err))
+			status, code, guidance, docURL := logErrorStatus(err, cluster.ClassifyActiveError)
+			writeStreamErrorClassified(w, logger, status, code,
+				fmt.Sprintf("opening logs for %s/%s: %v", namespace, name, err), guidance, docURL)
 			return
 		}
 		defer func() { _ = body.Close() }()
@@ -198,15 +203,30 @@ func writeSSEFrame(w http.ResponseWriter, flusher http.Flusher, event string, da
 	return true
 }
 
-// logErrorStatus maps a GetLogs failure to an HTTP status + code, mirroring the
-// REST engine's taxonomy (missing pod → 404, RBAC → 403, else upstream 502).
-func logErrorStatus(err error) (int, string) {
-	switch {
-	case apierrors.IsNotFound(err):
-		return http.StatusNotFound, "not_found"
-	case apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err):
-		return http.StatusForbidden, "forbidden"
-	default:
-		return http.StatusBadGateway, "cluster_unreachable"
+// logErrorStatus maps a GetLogs open failure to an HTTP status, code, guidance
+// and doc link, mirroring the REST engine's connectivity taxonomy (§3): a
+// missing pod is 404; otherwise the error is classified so an outage/auth/cert
+// failure surfaces its typed reason and remediation instead of an opaque 502.
+// The mapping is a small local copy — the package must not import
+// internal/resources.
+func logErrorStatus(err error, classify func(error) kube.Classification) (status int, code, guidance, docURL string) {
+	if apierrors.IsNotFound(err) {
+		return http.StatusNotFound, "not_found", "", ""
 	}
+	cls := classify(err)
+	switch cls.Class {
+	case kube.FailAuthExpired:
+		status, code = http.StatusUnauthorized, "auth_expired"
+	case kube.FailForbidden:
+		status, code = http.StatusForbidden, "forbidden"
+	case kube.FailTimeout:
+		status, code = http.StatusGatewayTimeout, "timeout"
+	case kube.FailAPIServer5xx:
+		status, code = http.StatusBadGateway, "apiserver_5xx"
+	case kube.FailConnectionRefused, kube.FailDNS, kube.FailTLSCert, kube.FailExecPluginMissing:
+		status, code = http.StatusBadGateway, string(cls.Class)
+	default:
+		status, code = http.StatusBadGateway, "cluster_unreachable"
+	}
+	return status, code, cls.Remediation, cls.DocURL
 }

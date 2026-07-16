@@ -57,7 +57,7 @@ func UpdateHandler(cluster Cluster, disco *DiscoveryService, logger *slog.Logger
 
 		info, ok, err := disco.Resolve(gvr)
 		if err != nil {
-			writeEngineError(w, logger, "resolving resource", err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, "resolving resource", err, classifierFor(cluster))
 			return
 		}
 		if !ok {
@@ -117,7 +117,7 @@ func UpdateHandler(cluster Cluster, disco *DiscoveryService, logger *slog.Logger
 		ri := namespacedResource(dyn, gvr, info.Namespaced, namespace)
 		updated, err := ri.Update(r.Context(), obj, metav1.UpdateOptions{})
 		if err != nil {
-			writeMutationError(w, logger, fmt.Sprintf("updating %s %q", gvr.Resource, name), err, execGuidanceFor(cluster))
+			writeMutationError(w, logger, fmt.Sprintf("updating %s %q", gvr.Resource, name), err, classifierFor(cluster))
 			return
 		}
 		// A Secret's data is re-masked on the way back so an apply response never
@@ -137,7 +137,7 @@ func DeleteHandler(cluster Cluster, disco *DiscoveryService, logger *slog.Logger
 
 		info, ok, err := disco.Resolve(gvr)
 		if err != nil {
-			writeEngineError(w, logger, "resolving resource", err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, "resolving resource", err, classifierFor(cluster))
 			return
 		}
 		if !ok {
@@ -164,7 +164,7 @@ func DeleteHandler(cluster Cluster, disco *DiscoveryService, logger *slog.Logger
 
 		ri := namespacedResource(dyn, gvr, info.Namespaced, namespace)
 		if err := ri.Delete(r.Context(), name, metav1.DeleteOptions{}); err != nil {
-			writeMutationError(w, logger, fmt.Sprintf("deleting %s %q", gvr.Resource, name), err, execGuidanceFor(cluster))
+			writeMutationError(w, logger, fmt.Sprintf("deleting %s %q", gvr.Resource, name), err, classifierFor(cluster))
 			return
 		}
 		writeJSON(w, logger, http.StatusOK, deletedResponse{Status: "deleted"})
@@ -216,7 +216,7 @@ func ScaleHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			writeMutationError(w, logger, action, err, execGuidanceFor(cluster))
+			writeMutationError(w, logger, action, err, classifierFor(cluster))
 			return
 		}
 		writeJSON(w, logger, http.StatusOK, map[string]any{"resource": resource, "name": name, "replicas": *req.Replicas})
@@ -257,7 +257,7 @@ func RestartHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 			_, err = clientset.AppsV1().DaemonSets(namespace).Patch(ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
 		}
 		if err != nil {
-			writeMutationError(w, logger, action, err, execGuidanceFor(cluster))
+			writeMutationError(w, logger, action, err, classifierFor(cluster))
 			return
 		}
 		writeJSON(w, logger, http.StatusOK, map[string]any{"resource": resource, "name": name, "restarted": true})

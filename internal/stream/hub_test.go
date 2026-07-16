@@ -2,7 +2,6 @@ package stream
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -14,10 +13,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
-	clienttesting "k8s.io/client-go/testing"
+
+	"github.com/skriptvalley/kubescope/internal/kube"
 )
 
 var podsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
@@ -30,6 +29,9 @@ type fakeCluster struct {
 
 func (f *fakeCluster) ActiveContextName() (string, error)           { return f.context, nil }
 func (f *fakeCluster) DynamicFor(string) (dynamic.Interface, error) { return f.dyn, nil }
+func (f *fakeCluster) ClassifyActiveError(err error) kube.Classification {
+	return kube.ClassifyError(err, kube.ClassifyHints{})
+}
 
 // nameShaper is a trivial shaper: the row is the object's name, so tests can
 // assert delivery/fan-out without depending on internal/resources.
@@ -256,22 +258,6 @@ func TestHubResyncBroadcastAndOverflow(t *testing.T) {
 		sub.si.broadcastResync()
 		assert.True(t, sub.TakeResync(), "resync must be pending after a broadcast")
 		assert.False(t, sub.TakeResync(), "TakeResync must clear the flag")
-	})
-
-	t.Run("apiserver watch error triggers a resync (SetWatchErrorHandler wiring)", func(t *testing.T) {
-		client := newFakeClient(t)
-		// The informer lists successfully (empty) but every watch fails; the
-		// reflector invokes the watch-error handler, which must broadcast resync.
-		client.PrependWatchReactor("pods", func(clienttesting.Action) (bool, watch.Interface, error) {
-			return true, nil, errors.New("simulated apiserver watch failure")
-		})
-		hub := testHub(t, client)
-		sub, err := hub.Subscribe(podsGVR, Filter{})
-		require.NoError(t, err)
-		defer sub.Close()
-
-		require.Eventually(t, sub.TakeResync, 5*time.Second, 20*time.Millisecond,
-			"a watch error must raise a resync for the subscriber")
 	})
 
 	t.Run("buffer overflow flags a resync instead of blocking", func(t *testing.T) {

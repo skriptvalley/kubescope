@@ -114,7 +114,7 @@ func RevealSecretHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc 
 		secret, err := clientset.CoreV1().Secrets(namespace).Get(r.Context(), name, metav1.GetOptions{})
 		if err != nil {
 			// The action string names the key, never a value.
-			writeEngineError(w, logger, fmt.Sprintf("revealing secret %q key %q", name, key), err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, fmt.Sprintf("revealing secret %q key %q", name, key), err, classifierFor(cluster))
 			return
 		}
 

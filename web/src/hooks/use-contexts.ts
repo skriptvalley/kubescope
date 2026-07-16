@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 
 import { api, type ContextInfo } from "@/lib/api";
+import { connectivity } from "@/lib/connectivity";
 import { clusterScopedKeyPrefixes } from "@/lib/query-keys";
 
 /** All kubeconfig contexts with their active flag. Cheap: no cluster calls. */
@@ -11,14 +13,39 @@ export function useContexts() {
   });
 }
 
+/** Health poll cadence (FB-6 Story D): back off from 30s to 60s while the active
+ *  context is unreachable so a down cluster is not probed at full cadence.
+ *  Exported for unit tests. */
+export function healthRefetchInterval(): number {
+  return connectivity.isActiveUnreachable() ? 60_000 : 30_000;
+}
+
 /** Per-context connection health. Probes clusters, so it loads independently
- *  of the context list and refreshes periodically. */
+ *  of the context list and refreshes periodically. Mirrors the active context's
+ *  health into the connectivity store so the banner and poll backoff react even
+ *  without an open watch stream. */
 export function useContextsHealth() {
-  return useQuery({
+  const { data: contexts } = useContexts();
+  const query = useQuery({
     queryKey: ["contexts", "health"],
     queryFn: api.contexts.health,
-    refetchInterval: 30_000,
+    refetchInterval: healthRefetchInterval,
   });
+
+  const activeName = contexts?.find((c) => c.active)?.name;
+  useEffect(() => {
+    if (!query.data || !activeName) return;
+    const active = query.data.find((h) => h.name === activeName);
+    if (!active) return;
+    if (active.reachable && active.authOK) {
+      connectivity.setActiveUnreachable(false);
+      connectivity.markEverConnected();
+    } else {
+      connectivity.setActiveUnreachable(true);
+    }
+  }, [query.data, activeName]);
+
+  return query;
 }
 
 /** Switch the active context, then drop every cluster-scoped cache and refetch

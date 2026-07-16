@@ -23,6 +23,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+
+	"github.com/skriptvalley/kubescope/internal/kube"
 )
 
 var configMapsGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
@@ -31,6 +33,9 @@ type envCluster struct{ dyn dynamic.Interface }
 
 func (e *envCluster) ActiveContextName() (string, error)           { return "env", nil }
 func (e *envCluster) DynamicFor(string) (dynamic.Interface, error) { return e.dyn, nil }
+func (e *envCluster) ClassifyActiveError(err error) kube.Classification {
+	return kube.ClassifyError(err, kube.ClassifyHints{})
+}
 
 // waitForNamed drains events until one of the wanted type+name arrives, failing
 // on timeout. Unrelated events (other objects seeded by the apiserver) are

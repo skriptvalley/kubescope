@@ -10,6 +10,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -83,6 +85,10 @@ type ContextHealth struct {
 	ServerVersion string `json:"serverVersion"`
 	Error         string `json:"error,omitempty"`
 	Guidance      string `json:"guidance,omitempty"`
+	// Reason is the FailureClass string for an unreachable/rejected context.
+	Reason string `json:"reason,omitempty"`
+	// DocURL links to the doc covering this failure's fix, when one applies.
+	DocURL string `json:"docURL,omitempty"`
 }
 
 // UnknownContextError is returned when a switch targets a context the
@@ -242,7 +248,9 @@ func (m *Manager) clientsFor(name string) (*cachedClient, error) {
 	if cached, ok := m.clients[name]; ok { // another goroutine may have built it
 		return cached, nil
 	}
-	restCfg, err := m.buildRestConfig(name)
+	// Read the source path under the held lock (buildRestConfig takes it as an
+	// argument) so a concurrent SetKubeconfigPath can't deadlock on a re-lock.
+	restCfg, err := m.buildRestConfig(m.kubeconfigPath, name)
 	if err != nil {
 		return nil, err
 	}
@@ -297,12 +305,11 @@ func (m *Manager) ProbeAll(ctx context.Context) ([]ContextHealth, error) {
 // probe checks one context. It builds a short-timeout rest.Config (never the
 // cached long-lived one) and calls ServerVersion, classifying the outcome.
 func (m *Manager) probe(ctx context.Context, raw clientcmdapi.Config, name string) ContextHealth {
-	usesExec := contextUsesExec(raw, name)
-	cmd := execCommand(raw, name)
+	hints := m.hintsFor(raw, name)
 
-	restCfg, err := m.buildRestConfig(name)
+	restCfg, err := m.buildRestConfig(m.KubeconfigPath(), name)
 	if err != nil {
-		h := classify(err, usesExec, cmd)
+		h := classify(err, hints)
 		h.Name = name
 		return h
 	}
@@ -310,7 +317,7 @@ func (m *Manager) probe(ctx context.Context, raw clientcmdapi.Config, name strin
 
 	cs, err := kubernetes.NewForConfig(restCfg)
 	if err != nil {
-		h := classify(err, usesExec, cmd)
+		h := classify(err, hints)
 		h.Name = name
 		return h
 	}
@@ -336,33 +343,61 @@ func (m *Manager) probe(ctx context.Context, raw clientcmdapi.Config, name strin
 		return ContextHealth{Name: name, Error: ctx.Err().Error()}
 	case res := <-done:
 		if res.err != nil {
-			h := classify(res.err, usesExec, cmd)
+			h := classify(res.err, hints)
 			h.Name = name
 			return h
 		}
+		// The probe reached the server on a freshly built config. If a cached
+		// client points at a different endpoint, the kubeconfig changed under us
+		// (e.g. a local cluster recreated on a new port) — evict it so REST and
+		// stream paths rebuild against the current file instead of dialing the
+		// dead endpoint forever.
+		m.evictStaleClient(name, restCfg.Host)
 		return ContextHealth{Name: name, Reachable: true, AuthOK: true, ServerVersion: res.version}
 	}
 }
 
-// rawConfig loads the kubeconfig from its explicit path. A missing or malformed
-// file returns a wrapped error rather than falling back to other kubeconfigs.
+// evictStaleClient drops the cached client for name when its endpoint no longer
+// matches the freshly resolved server host. Only called after a successful
+// probe of that host, so a working cache is never dropped on a transient error.
+func (m *Manager) evictStaleClient(name, freshHost string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cached, ok := m.clients[name]; ok && cached.restConfig.Host != freshHost {
+		delete(m.clients, name)
+	}
+}
+
+// rawConfig loads the kubeconfig from the current source path. A missing or
+// malformed file returns a wrapped error rather than falling back to other
+// kubeconfigs.
 func (m *Manager) rawConfig() (clientcmdapi.Config, error) {
-	loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: m.kubeconfigPath}
+	return m.rawConfigAt(m.KubeconfigPath())
+}
+
+// rawConfigAt loads and validates a kubeconfig at an explicit path. It never
+// touches Manager state, so it doubles as the validate-before-swap step of
+// SetKubeconfigPath. Error messages carry the path and the clientcmd parse
+// error only — never file contents.
+func (m *Manager) rawConfigAt(path string) (clientcmdapi.Config, error) {
+	loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: path}
 	cfg, err := loadingRules.Load()
 	if err != nil {
-		return clientcmdapi.Config{}, fmt.Errorf("loading kubeconfig %q: %w", m.kubeconfigPath, err)
+		return clientcmdapi.Config{}, fmt.Errorf("loading kubeconfig %q: %w", path, err)
 	}
 	if cfg == nil {
-		return clientcmdapi.Config{}, fmt.Errorf("loading kubeconfig %q: empty config", m.kubeconfigPath)
+		return clientcmdapi.Config{}, fmt.Errorf("loading kubeconfig %q: empty config", path)
 	}
 	return *cfg, nil
 }
 
-// buildRestConfig builds a rest.Config for the named context. Embedded
-// certs/tokens work as-is; exec-plugin and file-path-cert gotchas surface at
-// call time and are handled by the health probe (ADR-0004).
-func (m *Manager) buildRestConfig(name string) (*rest.Config, error) {
-	loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: m.kubeconfigPath}
+// buildRestConfig builds a rest.Config for the named context from the given
+// kubeconfig path. Embedded certs/tokens work as-is; exec-plugin and
+// file-path-cert gotchas surface at call time and are handled by the health
+// probe (ADR-0004). The path is passed in (not read from m) so a caller holding
+// m.mu can reuse the value it already read without re-locking.
+func (m *Manager) buildRestConfig(path, name string) (*rest.Config, error) {
+	loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: path}
 	overrides := &clientcmd.ConfigOverrides{CurrentContext: name}
 	cc := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides)
 	restCfg, err := cc.ClientConfig()
@@ -370,6 +405,102 @@ func (m *Manager) buildRestConfig(name string) (*rest.Config, error) {
 		return nil, fmt.Errorf("building rest config for context %q: %w", name, err)
 	}
 	return restCfg, nil
+}
+
+// KubeconfigPath returns the current kubeconfig source path.
+func (m *Manager) KubeconfigPath() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.kubeconfigPath
+}
+
+// SetKubeconfigPath repoints the Manager at a different kubeconfig file at
+// runtime (ADR-0007). The candidate is validated BEFORE any swap — it must be a
+// non-empty absolute path that parses and defines at least one context — so a
+// working source is never lost to a typo. On success the source path, the
+// in-memory active-context override, and the per-context client cache are reset
+// in a single critical section, so setup state and /contexts reflect the new
+// file immediately. File contents are never logged or echoed in errors.
+func (m *Manager) SetKubeconfigPath(path string) error {
+	if path == "" {
+		return errors.New("kubeconfig path must not be empty")
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("kubeconfig path %q must be absolute", path)
+	}
+	raw, err := m.rawConfigAt(path)
+	if err != nil {
+		return err
+	}
+	if len(raw.Contexts) == 0 {
+		return fmt.Errorf("kubeconfig %q defines no contexts", path)
+	}
+
+	m.mu.Lock()
+	m.kubeconfigPath = path
+	m.active = ""
+	m.clients = make(map[string]*cachedClient)
+	m.mu.Unlock()
+	return nil
+}
+
+// hintsFor derives the classification hints for a context: the exec-plugin
+// command (if any) and whether the apiserver host is a loopback address.
+func (m *Manager) hintsFor(raw clientcmdapi.Config, name string) ClassifyHints {
+	return ClassifyHints{
+		ExecCommand:    execCommand(raw, name),
+		LoopbackServer: serverIsLoopback(raw, name),
+	}
+}
+
+// serverIsLoopback reports whether the named context's cluster server URL points
+// at a loopback host (127.0.0.1 / localhost / ::1) — the case where a
+// containerized Kubescope needs host.docker.internal or --network host.
+func serverIsLoopback(raw clientcmdapi.Config, name string) bool {
+	c, ok := raw.Contexts[name]
+	if !ok {
+		return false
+	}
+	cl, ok := raw.Clusters[c.Cluster]
+	if !ok {
+		return false
+	}
+	u, err := url.Parse(cl.Server)
+	if err != nil {
+		return false
+	}
+	switch u.Hostname() { // Hostname strips the port and IPv6 brackets
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
+	return false
+}
+
+// ClassifyActiveError sorts an error from the active context into the failure
+// taxonomy, resolving that context's hints on a best-effort basis (zero hints if
+// the kubeconfig can't be read or no context is active).
+func (m *Manager) ClassifyActiveError(err error) Classification {
+	var hints ClassifyHints
+	if raw, rerr := m.rawConfig(); rerr == nil {
+		if name, aerr := m.resolveActive(raw); aerr == nil {
+			hints = m.hintsFor(raw, name)
+		}
+	}
+	return ClassifyError(err, hints)
+}
+
+// ProbeContext probes a single named context's connectivity. A kubeconfig that
+// can't be read, or a name the kubeconfig does not define, yields an unreachable
+// ContextHealth with reason "unknown" rather than an error.
+func (m *Manager) ProbeContext(ctx context.Context, name string) ContextHealth {
+	raw, err := m.rawConfig()
+	if err != nil {
+		return ContextHealth{Name: name, Error: err.Error(), Reason: string(FailUnknown)}
+	}
+	if _, ok := raw.Contexts[name]; !ok {
+		return ContextHealth{Name: name, Error: "unknown context", Reason: string(FailUnknown)}
+	}
+	return m.probe(ctx, raw, name)
 }
 
 // resolveActive returns the active context name: the in-memory override if set

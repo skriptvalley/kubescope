@@ -72,7 +72,7 @@ func SearchHandler(cluster Cluster, disco *DiscoveryService, logger *slog.Logger
 
 		result, err := disco.Get(false)
 		if err != nil {
-			writeEngineError(w, logger, "discovering resources for search", err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, "discovering resources for search", err, classifierFor(cluster))
 			return
 		}
 		dyn, err := cluster.Dynamic()

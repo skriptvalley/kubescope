@@ -12,6 +12,7 @@ Decisions that lock Kubescope's technical direction. Referenced from [../ARCHITE
 | 0004 | [Cluster auth and kubeconfig in Docker](0004-cluster-auth-and-kubeconfig-in-docker.md) | Accepted | 2026-07-14 |
 | 0005 | [Security posture: read-only mode and secret masking](0005-security-posture-read-only-and-secret-masking.md) | Accepted | 2026-07-14 |
 | 0006 | [Live updates via SSE, streaming via WebSocket](0006-live-updates-sse-and-streaming-websocket.md) | Accepted | 2026-07-14 |
+| 0007 | [Runtime kubeconfig source: path-only, opt-in](0007-runtime-kubeconfig-source.md) | Accepted | 2026-07-17 |
 
 ## Template (MADR-style)
 

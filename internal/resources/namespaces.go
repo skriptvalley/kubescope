@@ -27,7 +27,7 @@ func NamespacesHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 		}
 		nsList, err := clientset.CoreV1().Namespaces().List(r.Context(), metav1.ListOptions{})
 		if err != nil {
-			writeUnreachable(w, logger, "listing namespaces", err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, "listing namespaces", err, classifierFor(cluster))
 			return
 		}
 		names := make([]string, 0, len(nsList.Items))

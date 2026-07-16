@@ -17,11 +17,26 @@ const (
 	EventAdd    EventType = "add"
 	EventUpdate EventType = "update"
 	EventDelete EventType = "delete"
-	// EventResync tells the client its view may have gaps (a watch error forced
-	// a re-list, or its buffer overflowed) and it should refetch a clean
+	// EventResync tells the client its view may have gaps (its buffer overflowed,
+	// or the cluster just recovered from an outage) and it should refetch a clean
 	// baseline. It carries no payload.
 	EventResync EventType = "resync"
+	// EventStatus reports a change in cluster reachability for this GVR's watch:
+	// State "unreachable" when the shared informer's watch has been failing, and
+	// "connected" once a recovery probe succeeds again. It carries a StatusInfo.
+	// Emitted once per transition (repeated failures are dampened, FB-6).
+	EventStatus EventType = "status"
 )
+
+// StatusInfo is the payload of an EventStatus frame: the connectivity transition
+// (unreachable/connected) plus a classified reason, sanitized error message and
+// actionable remediation the UI surfaces in a banner (FB-6, Story D).
+type StatusInfo struct {
+	State    string `json:"state"`              // "unreachable" | "connected"
+	Reason   string `json:"reason,omitempty"`   // kube.FailureClass
+	Message  string `json:"message,omitempty"`  // sanitized error
+	Guidance string `json:"guidance,omitempty"` // remediation
+}
 
 // ObjectRef is the minimal identity of an object, used for delete events where
 // the frontend only needs to drop the matching row/detail.
@@ -40,4 +55,5 @@ type Event struct {
 	Row    any            `json:"row,omitempty"`
 	Object map[string]any `json:"object,omitempty"`
 	Ref    *ObjectRef     `json:"ref,omitempty"`
+	Status *StatusInfo    `json:"status,omitempty"`
 }

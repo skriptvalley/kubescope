@@ -56,7 +56,7 @@ func EventsHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 			FieldSelector: selector.AsSelector().String(),
 		})
 		if err != nil {
-			writeUnreachable(w, logger, "listing events", err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, "listing events", err, classifierFor(cluster))
 			return
 		}
 
@@ -88,7 +88,7 @@ func EventsFeedHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 
 		list, err := clientset.CoreV1().Events(namespace).List(r.Context(), metav1.ListOptions{})
 		if err != nil {
-			writeUnreachable(w, logger, "listing events", err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, "listing events", err, classifierFor(cluster))
 			return
 		}
 

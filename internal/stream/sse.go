@@ -85,6 +85,14 @@ func runSSE(w http.ResponseWriter, r *http.Request, flusher http.Flusher, logger
 	ctx := r.Context()
 
 	for {
+		// A connectivity transition (cluster went unreachable, or recovered) is
+		// surfaced as a status frame so the UI can show/hide its banner. Checked
+		// here — after every heartbeat tick and event send — like resync.
+		if info := sub.TakeStatus(); info != nil {
+			if !writeEvent(w, flusher, logger, Event{Type: EventStatus, Status: info}) {
+				return
+			}
+		}
 		// A pending resync supersedes buffered events: the client will refetch a
 		// clean baseline, so any events still queued (older than the ones dropped
 		// on overflow) are stale and must be discarded, not applied over the
@@ -156,11 +164,24 @@ func setSSEHeaders(w http.ResponseWriter) {
 // writeStreamError writes a structured JSON error before any SSE headers exist
 // (subscribe failed). EventSource treats it as a connection error and retries.
 func writeStreamError(w http.ResponseWriter, logger *slog.Logger, status int, code, message string) {
+	writeStreamErrorClassified(w, logger, status, code, message, "", "")
+}
+
+// writeStreamErrorClassified is writeStreamError plus the optional classifier
+// output (remediation and doc link) so a pre-open connectivity failure carries
+// the same actionable fields as the REST error envelope. Empty guidance/docURL
+// are omitted, keeping the simple errors byte-identical to writeStreamError.
+func writeStreamErrorClassified(w http.ResponseWriter, logger *slog.Logger, status int, code, message, guidance, docURL string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(map[string]map[string]string{
-		"error": {"code": code, "message": message},
-	}); err != nil {
+	e := map[string]string{"code": code, "message": message}
+	if guidance != "" {
+		e["guidance"] = guidance
+	}
+	if docURL != "" {
+		e["docURL"] = docURL
+	}
+	if err := json.NewEncoder(w).Encode(map[string]map[string]string{"error": e}); err != nil {
 		logger.Error("encoding stream error", "error", err)
 	}
 }

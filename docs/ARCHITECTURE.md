@@ -112,6 +112,7 @@ docker run --rm -p 8080:8080 -v ~/.kube/config:/kubeconfig:ro ghcr.io/skriptvall
 | `KUBESCOPE_KUBECONFIG` | `/kubeconfig`, falling back to `$KUBECONFIG`, then `~/.kube/config` | Path to kubeconfig |
 | `KUBESCOPE_READ_ONLY` | `false` | Reject all mutating operations when `true` |
 | `KUBESCOPE_AUTH_MODE` | `none` | `none` \| `basic` \| `oidc` (basic/oidc land in Sprint 8) |
+| `KUBESCOPE_ALLOW_KUBECONFIG_SET` | `false` | Enable the runtime set-kubeconfig endpoint (`PUT /api/v1/kubeconfig`, path-only; [adr/0007](adr/0007-runtime-kubeconfig-source.md)) |
 
 ## v2 seams
 

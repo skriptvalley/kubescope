@@ -34,6 +34,30 @@ export interface ContextHealth {
   serverVersion: string;
   error?: string;
   guidance?: string;
+  /** Failure taxonomy class (FB-6) — e.g. connection_refused, tls_cert. */
+  reason?: string;
+  /** Deep-link to the relevant remediation doc, when one applies. */
+  docURL?: string;
+}
+
+/** First-run / connectivity posture of the server (FB-6). Drives the starter
+ *  page and the unreachable banner. Always returned 200 by GET /api/v1/setup. */
+export interface SetupState {
+  state:
+    | "no_kubeconfig"
+    | "no_contexts"
+    | "no_active_context"
+    | "active_unreachable"
+    | "ready";
+  /** Machine reason: kubeconfig_missing | kubeconfig_invalid | no_current_context
+   *  | a FailureClass | "". */
+  reason?: string;
+  message?: string;
+  guidance?: string;
+  docURL?: string;
+  kubeconfigPath: string;
+  activeContext?: string;
+  canSetKubeconfig: boolean;
 }
 
 export interface Overview {
@@ -366,6 +390,7 @@ interface ErrorEnvelope {
     code?: string;
     message?: string;
     guidance?: string;
+    docURL?: string;
   };
 }
 
@@ -375,13 +400,16 @@ export class ApiError extends Error {
   readonly status: number;
   /** Optional remediation text (e.g. ADR-0004 exec-plugin guidance). */
   readonly guidance?: string;
+  /** Optional deep-link to the relevant remediation doc (FB-6). */
+  readonly docURL?: string;
 
-  constructor(message: string, code: string, status: number, guidance?: string) {
+  constructor(message: string, code: string, status: number, guidance?: string, docURL?: string) {
     super(message);
     this.name = "ApiError";
     this.code = code;
     this.status = status;
     this.guidance = guidance;
+    this.docURL = docURL;
   }
 }
 
@@ -400,15 +428,17 @@ async function toApiError(response: Response): Promise<ApiError> {
   let code = "unknown_error";
   let message = `request failed with status ${response.status}`;
   let guidance: string | undefined;
+  let docURL: string | undefined;
   try {
     const body = (await response.json()) as ErrorEnvelope;
     code = body.error?.code ?? code;
     message = body.error?.message ?? message;
     guidance = body.error?.guidance;
+    docURL = body.error?.docURL;
   } catch {
     // Non-JSON error body; keep the generic message.
   }
-  return new ApiError(message, code, response.status, guidance);
+  return new ApiError(message, code, response.status, guidance, docURL);
 }
 
 /** Per-pod outcome of a node drain. */
@@ -454,6 +484,19 @@ export interface StartPortForwardParams {
 
 export const api = {
   config: async (): Promise<ServerConfig> => request<ServerConfig>("/api/v1/config"),
+  /** First-run / connectivity posture (FB-6). Unguarded; always 200. */
+  setup: {
+    state: async (): Promise<SetupState> => request<SetupState>("/api/v1/setup"),
+    /** Repoint the server at another kubeconfig at runtime (ADR-0007). Guarded
+     *  by KUBESCOPE_ALLOW_KUBECONFIG_SET and read-only mode server-side. Returns
+     *  the fresh setup state on success. */
+    setKubeconfig: async (path: string): Promise<SetupState> =>
+      request<SetupState>("/api/v1/kubeconfig", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      }),
+  },
   nodes: {
     list: async (): Promise<NodeSummary[]> =>
       (await request<NodeListResponse>("/api/v1/nodes")).items,

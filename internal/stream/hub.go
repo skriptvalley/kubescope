@@ -1,16 +1,20 @@
 package stream
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/skriptvalley/kubescope/internal/kube"
 )
 
 // defaultResyncPeriod is the informer's periodic re-sync. It re-delivers the
@@ -23,13 +27,26 @@ const defaultResyncPeriod = 10 * time.Minute
 // subscriber is flagged for resync so it refetches a clean baseline.
 const defaultEventBuffer = 256
 
+// Recovery-prober backoff bounds. When a watch goes unreachable a single prober
+// per shared informer retries a cheap LIST on a bounded exponential backoff
+// (base, 2×, … capped), so a sustained outage neither busy-loops nor storms
+// resyncs across clients (FB-6). proberListTimeout caps each probe.
+const (
+	defaultProberBase = 1 * time.Second
+	defaultProberCap  = 30 * time.Second
+	proberListTimeout = 5 * time.Second
+)
+
 // Cluster is the slice of the kube manager the hub needs: resolve the active
-// context and build a dynamic client for it. *kube.Manager satisfies it; tests
-// fake it. DynamicFor takes an explicit name so the informer is keyed and built
-// under the same context, never diverging under a concurrent switch.
+// context, build a dynamic client for it, and classify a connectivity failure
+// so the watch path can report a typed, actionable status. *kube.Manager
+// satisfies it; tests fake it. DynamicFor takes an explicit name so the informer
+// is keyed and built under the same context, never diverging under a concurrent
+// switch.
 type Cluster interface {
 	ActiveContextName() (string, error)
 	DynamicFor(name string) (dynamic.Interface, error)
+	ClassifyActiveError(err error) kube.Classification
 }
 
 // Shaper turns a live object into the row a list/feed view renders. Injected so
@@ -65,6 +82,8 @@ type Hub struct {
 	logger      *slog.Logger
 	resync      time.Duration
 	eventBuffer int
+	proberBase  time.Duration
+	proberCap   time.Duration
 
 	mu        sync.Mutex
 	informers map[hubKey]*sharedGVRInformer
@@ -95,6 +114,12 @@ func WithEventBuffer(n int) HubOption { return func(h *Hub) { h.eventBuffer = n 
 // over the watch stream — the same masking the REST detail/YAML paths apply.
 func WithObjectSanitizer(fn ObjectSanitizer) HubOption { return func(h *Hub) { h.sanitize = fn } }
 
+// WithProberBackoff overrides the recovery prober's base and cap delays. Tests
+// inject tiny delays to exercise the backoff without real waits.
+func WithProberBackoff(base, capDelay time.Duration) HubOption {
+	return func(h *Hub) { h.proberBase = base; h.proberCap = capDelay }
+}
+
 // NewHub builds a Hub over the given cluster and row shaper.
 func NewHub(cluster Cluster, shaper Shaper, logger *slog.Logger, opts ...HubOption) *Hub {
 	h := &Hub{
@@ -103,6 +128,8 @@ func NewHub(cluster Cluster, shaper Shaper, logger *slog.Logger, opts ...HubOpti
 		logger:      logger,
 		resync:      defaultResyncPeriod,
 		eventBuffer: defaultEventBuffer,
+		proberBase:  defaultProberBase,
+		proberCap:   defaultProberCap,
 		informers:   make(map[hubKey]*sharedGVRInformer),
 	}
 	for _, opt := range opts {
@@ -131,7 +158,11 @@ func (h *Hub) Subscribe(gvr schema.GroupVersionResource, filter Filter) (*Subscr
 		if err != nil {
 			return nil, err
 		}
-		si = newSharedGVRInformer(dyn, gvr, h.resync, h.logger)
+		// refreshDyn re-resolves the context's dynamic client on every recovery
+		// probe: after an outage the endpoint may have moved (a recreated local
+		// cluster gets a new port) and only a freshly built client can reach it.
+		refreshDyn := func() (dynamic.Interface, error) { return h.cluster.DynamicFor(ctxName) }
+		si = newSharedGVRInformer(dyn, refreshDyn, gvr, h.resync, h.logger, h.cluster.ClassifyActiveError, h.proberBase, h.proberCap)
 		h.informers[k] = si
 	}
 	// Register the handler before starting Run so the first subscriber receives
@@ -150,6 +181,39 @@ func (h *Hub) activeInformers() int {
 	return len(h.informers)
 }
 
+// SyncContextHealth feeds a fresh health-probe result into the watch layer: a
+// probe that found the context unreachable marks every informer on it
+// unreachable (the same dampened transition + recovery prober as a watch
+// error). This exists because a cluster can die silently — a half-open TCP
+// watch may not error for minutes — while probes detect the outage within
+// seconds; without it a recreated cluster leaves informers attached to the
+// dead endpoint forever. Recovery stays the prober's job (probe successes are
+// not synced), so a transient failed probe costs at most one status flap.
+func (h *Hub) SyncContextHealth(health kube.ContextHealth) {
+	if health.Reachable {
+		return
+	}
+	info := &StatusInfo{
+		State:    "unreachable",
+		Reason:   health.Reason,
+		Message:  health.Error,
+		Guidance: health.Guidance,
+	}
+	// Collect under hub.mu, mark outside it: Subscription.Close locks si then
+	// hub, so holding both here in the opposite order would deadlock.
+	h.mu.Lock()
+	informers := make([]*sharedGVRInformer, 0, len(h.informers))
+	for k, si := range h.informers {
+		if k.context == health.Name {
+			informers = append(informers, si)
+		}
+	}
+	h.mu.Unlock()
+	for _, si := range informers {
+		si.markUnreachable(info)
+	}
+}
+
 // Subscription is one client's handle on a shared informer. Events() streams
 // add/update/delete; TakeResync() reports (and clears) a pending resync;
 // Close() releases the subscription exactly once.
@@ -166,8 +230,14 @@ type Subscription struct {
 func (s *Subscription) Events() <-chan Event { return s.sub.events }
 
 // TakeResync reports whether a resync is pending, clearing the flag. A resync
-// is raised by a watch-error re-list or by this subscriber's buffer overflowing.
+// is raised by this subscriber's buffer overflowing or by a recovery from a
+// cluster outage (the client refetches a clean baseline).
 func (s *Subscription) TakeResync() bool { return s.sub.resync.Swap(false) }
+
+// TakeStatus reports (and clears) a pending connectivity status change for this
+// subscriber. Nil when none is pending. Set on a reachable↔unreachable
+// transition and, for a subscriber that attaches mid-outage, at attach time.
+func (s *Subscription) TakeStatus() *StatusInfo { return s.sub.status.Swap(nil) }
 
 // Context is the context name this subscription is bound to; the SSE handler
 // closes the stream when the active context moves off it.
@@ -191,29 +261,71 @@ func (s *Subscription) Close() {
 }
 
 // sharedGVRInformer wraps one dynamic informer, its subscribers and its
-// lifecycle. refs is guarded by Hub.mu (the only writer); everything else by mu.
+// lifecycle. refs is guarded by Hub.mu (the only writer); everything else —
+// including the informer/stopCh pair, which the recovery path can swap for a
+// rebuilt one — by mu.
 type sharedGVRInformer struct {
-	informer cache.SharedIndexInformer
-	stopCh   chan struct{}
-	stopOnce sync.Once
-	logger   *slog.Logger
+	dyn        dynamic.Interface // client the current informer was built on
+	refreshDyn func() (dynamic.Interface, error)
+	gvr        schema.GroupVersionResource
+	classify   func(error) kube.Classification
+	resync     time.Duration
+	logger     *slog.Logger
+	proberBase time.Duration
+	proberCap  time.Duration
 
-	mu      sync.Mutex
-	subs    map[*subscriber]cache.ResourceEventHandlerRegistration
-	started bool
-	refs    int // guarded by Hub.mu
+	mu             sync.Mutex
+	informer       cache.SharedIndexInformer
+	stopCh         chan struct{}
+	stopped        bool
+	subs           map[*subscriber]cache.ResourceEventHandlerRegistration
+	started        bool
+	refs           int // guarded by Hub.mu
+	unreachable    bool
+	lastStatus     *StatusInfo
+	proberOn       bool
+	proberAttempts atomic.Int64 // recovery-probe LIST attempts; read in tests
 }
 
-func newSharedGVRInformer(dyn dynamic.Interface, gvr schema.GroupVersionResource, resync time.Duration, logger *slog.Logger) *sharedGVRInformer {
+func newSharedGVRInformer(dyn dynamic.Interface, refreshDyn func() (dynamic.Interface, error), gvr schema.GroupVersionResource, resync time.Duration, logger *slog.Logger, classify func(error) kube.Classification, proberBase, proberCap time.Duration) *sharedGVRInformer {
+	si := &sharedGVRInformer{
+		dyn:        dyn,
+		refreshDyn: refreshDyn,
+		gvr:        gvr,
+		classify:   classify,
+		resync:     resync,
+		stopCh:     make(chan struct{}),
+		logger:     logger,
+		proberBase: proberBase,
+		proberCap:  proberCap,
+		subs:       make(map[*subscriber]cache.ResourceEventHandlerRegistration),
+	}
+	si.informer = si.buildInformer(dyn)
+	return si
+}
+
+// buildInformer constructs the dynamic informer this sharedGVRInformer fans out
+// from — once at creation and again when recovery rebuilds on a fresh client (a
+// stopped SharedIndexInformer cannot be re-Run).
+func (si *sharedGVRInformer) buildInformer(dyn dynamic.Interface) cache.SharedIndexInformer {
 	informer := dynamicinformer.NewFilteredDynamicInformer(
-		dyn, gvr, metav1NamespaceAll, resync,
+		dyn, si.gvr, metav1NamespaceAll, si.resync,
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, nil,
 	).Informer()
-	return &sharedGVRInformer{
-		informer: informer,
-		stopCh:   make(chan struct{}),
-		logger:   logger,
-		subs:     make(map[*subscriber]cache.ResourceEventHandlerRegistration),
+	if err := informer.SetWatchErrorHandler(func(_ *cache.Reflector, err error) { si.handleWatchError(err) }); err != nil {
+		si.logger.Error("setting watch error handler", "error", err)
+	}
+	return informer
+}
+
+// handlerFor is the event-handler set delivering to one subscriber; shared by
+// the attach path and the recovery rebuild (which re-registers every
+// subscriber on the new informer).
+func handlerFor(sub *subscriber) cache.ResourceEventHandlerFuncs {
+	return cache.ResourceEventHandlerFuncs{
+		AddFunc:    func(obj any) { sub.deliver(EventAdd, obj) },
+		UpdateFunc: func(_, obj any) { sub.deliver(EventUpdate, obj) },
+		DeleteFunc: func(obj any) { sub.deliver(EventDelete, obj) },
 	}
 }
 
@@ -229,16 +341,21 @@ func (si *sharedGVRInformer) addSubscriber(filter Filter, gvr schema.GroupVersio
 		shaper:   shaper,
 		sanitize: sanitize,
 	}
-	reg, err := si.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(obj any) { sub.deliver(EventAdd, obj) },
-		UpdateFunc: func(_, obj any) { sub.deliver(EventUpdate, obj) },
-		DeleteFunc: func(obj any) { sub.deliver(EventDelete, obj) },
-	})
+	// Register under the lock so a concurrent recovery rebuild either sees this
+	// subscriber in subs (and re-registers it on the new informer) or the
+	// handler lands on the new informer directly — never on a stopped one.
+	si.mu.Lock()
+	reg, err := si.informer.AddEventHandler(handlerFor(sub))
 	if err != nil {
 		si.logger.Error("adding informer handler", "error", err)
 	}
-	si.mu.Lock()
 	si.subs[sub] = reg
+	// A subscriber attaching during an ongoing outage immediately learns the
+	// cluster is unreachable, so its banner shows without waiting for the next
+	// transition (which is dampened and may never come while it stays down).
+	if si.unreachable && si.lastStatus != nil {
+		sub.status.Store(si.lastStatus)
+	}
 	si.mu.Unlock()
 	return sub
 }
@@ -246,21 +363,33 @@ func (si *sharedGVRInformer) addSubscriber(filter Filter, gvr schema.GroupVersio
 func (si *sharedGVRInformer) removeSubscriber(sub *subscriber) {
 	si.mu.Lock()
 	reg := si.subs[sub]
+	informer := si.informer // the informer this registration belongs to
 	delete(si.subs, sub)
 	si.mu.Unlock()
 	if reg != nil {
-		if err := si.informer.RemoveEventHandler(reg); err != nil {
+		if err := informer.RemoveEventHandler(reg); err != nil {
 			si.logger.Error("removing informer handler", "error", err)
 		}
 	}
 }
 
-// broadcastResync flags every subscriber for resync. Called from the watch
-// error handler (a re-list means the client may have gaps).
+// broadcastResync flags every subscriber for resync. Called on recovery so
+// every client refetches a clean baseline over the gap the outage left.
 func (si *sharedGVRInformer) broadcastResync() {
 	si.mu.Lock()
 	for sub := range si.subs {
 		sub.resync.Store(true)
+	}
+	si.mu.Unlock()
+}
+
+// broadcastStatus hands every subscriber the latest connectivity status, read
+// and emitted by each SSE loop. A newer status overwrites an unread one — only
+// the current state matters.
+func (si *sharedGVRInformer) broadcastStatus(info *StatusInfo) {
+	si.mu.Lock()
+	for sub := range si.subs {
+		sub.status.Store(info)
 	}
 	si.mu.Unlock()
 }
@@ -272,22 +401,193 @@ func (si *sharedGVRInformer) ensureStarted() {
 		return
 	}
 	si.started = true
-	// Set before Run: a watch error triggers a re-list, and subscribers must be
-	// told so they refetch a clean baseline.
-	if err := si.informer.SetWatchErrorHandler(func(_ *cache.Reflector, _ error) { si.broadcastResync() }); err != nil {
-		si.logger.Error("setting watch error handler", "error", err)
-	}
+	// The watch-error handler was set at build time (buildInformer): the
+	// reflector invokes it on every failed ListAndWatch. The first failure
+	// transitions the informer to unreachable and broadcasts a typed status;
+	// repeated failures are dampened (no resync storm) and recovery is driven
+	// by a dedicated prober.
 	go si.informer.Run(si.stopCh)
 }
 
-func (si *sharedGVRInformer) stop() {
-	si.stopOnce.Do(func() { close(si.stopCh) })
+// handleWatchError sorts a watch/list failure into the failure taxonomy and
+// marks the informer unreachable.
+func (si *sharedGVRInformer) handleWatchError(err error) {
+	cls := si.classify(err)
+	si.markUnreachable(&StatusInfo{
+		State:    "unreachable",
+		Reason:   string(cls.Class),
+		Message:  err.Error(),
+		Guidance: cls.Remediation,
+	})
 }
 
-// subscriber is one registration's channel + filter + resync flag.
+// markUnreachable records an outage (from a watch error or a failed health
+// probe) and, on the reachable→unreachable transition, broadcasts the status
+// once, logs a single warning and starts the recovery prober. While already
+// unreachable it dampens: no broadcast, only refreshing the cached reason so a
+// subscriber attaching later (or the eventual recovery) reflects the latest.
+func (si *sharedGVRInformer) markUnreachable(info *StatusInfo) {
+	si.mu.Lock()
+	if si.unreachable {
+		if si.lastStatus == nil || si.lastStatus.Reason != info.Reason {
+			si.lastStatus = info
+		}
+		si.mu.Unlock()
+		return
+	}
+	si.unreachable = true
+	si.lastStatus = info
+	startProber := !si.proberOn
+	si.proberOn = si.proberOn || startProber
+	si.mu.Unlock()
+
+	si.logger.Warn("watch stream unreachable", "gvr", si.gvr.String(), "reason", info.Reason)
+	si.broadcastStatus(info)
+	if startProber {
+		go si.runProber()
+	}
+}
+
+// runProber retries a cheap LIST on a bounded exponential backoff until it
+// succeeds (recovery) or the informer is stopped. Exactly one runs per shared
+// informer during an outage. proberOn is cleared in the same critical section
+// as the state each exit publishes (recover, or the stop path below) — a
+// deferred clear after recover would leave a window where a new watch error
+// sees reachable+proberOn and transitions to unreachable without starting a
+// prober, sticking the stream in an outage nothing ever ends.
+func (si *sharedGVRInformer) runProber() {
+	delay := si.proberBase
+	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-si.stopCh:
+			timer.Stop()
+			si.mu.Lock()
+			si.proberOn = false
+			si.mu.Unlock()
+			return
+		case <-timer.C:
+		}
+
+		si.proberAttempts.Add(1)
+		// Probe with a freshly resolved client, not the informer's: after an
+		// outage the endpoint may have moved (a recreated local cluster gets a
+		// new port), and only a rebuilt client can reach the new address.
+		dyn := si.dyn
+		if si.refreshDyn != nil {
+			fresh, err := si.refreshDyn()
+			if err != nil {
+				dyn = nil // kubeconfig currently unreadable — back off and retry
+			} else {
+				dyn = fresh
+			}
+		}
+		if dyn != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), proberListTimeout)
+			_, err := dyn.Resource(si.gvr).List(ctx, metav1.ListOptions{Limit: 1})
+			cancel()
+			if err == nil {
+				// The cluster answered. If it answered on a different client than
+				// the informer was built on, the old informer can never reconnect
+				// — rebuild it on the working client before announcing recovery.
+				if dyn != si.dyn {
+					si.rebuildInformer(dyn)
+				}
+				si.recover()
+				return
+			}
+		}
+
+		if delay < si.proberCap {
+			delay *= 2
+			if delay > si.proberCap {
+				delay = si.proberCap
+			}
+		}
+	}
+}
+
+// recover clears the unreachable state and tells every subscriber the cluster
+// is back: a "connected" status hides the banner and a resync makes each client
+// refetch a clean baseline over the gap the outage left. proberOn is cleared
+// together with unreachable so a concurrent watch error always observes a
+// consistent pair and restarts the prober on the next transition.
+func (si *sharedGVRInformer) recover() {
+	si.mu.Lock()
+	si.proberOn = false
+	if !si.unreachable {
+		si.mu.Unlock()
+		return
+	}
+	si.unreachable = false
+	si.lastStatus = nil
+	si.mu.Unlock()
+
+	si.logger.Info("watch stream recovered", "gvr", si.gvr.String())
+	si.broadcastStatus(&StatusInfo{State: "connected"})
+	si.broadcastResync()
+}
+
+// isUnreachable reports the current outage state (teardown/recovery assertions).
+func (si *sharedGVRInformer) isUnreachable() bool {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	return si.unreachable
+}
+
+// proberActive reports whether a recovery prober goroutine is running (leak
+// assertions after Close).
+func (si *sharedGVRInformer) proberActive() bool {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	return si.proberOn
+}
+
+// rebuildInformer swaps in a new informer built on dyn — the recovery path when
+// the cluster came back at a different endpoint. The old informer is stopped
+// (a stopped SharedIndexInformer cannot be re-Run); every subscriber keeps its
+// channel and is re-registered on the new informer, whose initial LIST replays
+// the current objects (subscribers also get a resync from recover()).
+func (si *sharedGVRInformer) rebuildInformer(dyn dynamic.Interface) {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	if si.stopped {
+		return // torn down while the prober was in flight — nothing to rebuild
+	}
+	close(si.stopCh)
+	si.stopCh = make(chan struct{})
+	si.dyn = dyn
+	si.informer = si.buildInformer(dyn)
+	for sub := range si.subs {
+		reg, err := si.informer.AddEventHandler(handlerFor(sub))
+		if err != nil {
+			si.logger.Error("re-adding informer handler after rebuild", "error", err)
+			continue
+		}
+		si.subs[sub] = reg
+	}
+	si.logger.Info("watch informer rebuilt on a fresh client", "gvr", si.gvr.String())
+	if si.started {
+		go si.informer.Run(si.stopCh)
+	}
+}
+
+func (si *sharedGVRInformer) stop() {
+	si.mu.Lock()
+	defer si.mu.Unlock()
+	if !si.stopped {
+		si.stopped = true
+		close(si.stopCh)
+	}
+}
+
+// subscriber is one registration's channel + filter + resync/status flags. The
+// status slot holds the latest pending connectivity change (nil when none),
+// read and emitted by the SSE loop alongside resync.
 type subscriber struct {
 	events   chan Event
 	resync   atomic.Bool
+	status   atomic.Pointer[StatusInfo]
 	filter   Filter
 	gvr      schema.GroupVersionResource
 	shaper   Shaper

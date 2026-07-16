@@ -201,13 +201,13 @@ func TestDiscoveryHandler(t *testing.T) {
 		assert.Equal(t, "kubeconfig_unavailable", errorCode(t, rec.Body.Bytes()))
 	})
 
-	t.Run("unreachable cluster is a structured 502", func(t *testing.T) {
+	t.Run("connection refused is classified 502 connection_refused", func(t *testing.T) {
 		disc := &countingDiscovery{err: errors.New("connection refused")}
 		svc, cluster := newSvcCluster(disc, "ctx-a", nil)
 		rec := httptest.NewRecorder()
 		DiscoveryHandler(svc, cluster, discardLogger())(rec, httptest.NewRequest(http.MethodGet, "/api/v1/discovery", nil))
 
 		assert.Equal(t, http.StatusBadGateway, rec.Code)
-		assert.Equal(t, "cluster_unreachable", errorCode(t, rec.Body.Bytes()))
+		assert.Equal(t, "connection_refused", errorCode(t, rec.Body.Bytes()))
 	})
 }

@@ -66,7 +66,7 @@ func setSchedulable(cluster Cluster, logger *slog.Logger, unschedulable bool) ht
 			if !unschedulable {
 				verb = "uncordoning"
 			}
-			writeMutationError(w, logger, fmt.Sprintf("%s node %q", verb, name), err, execGuidanceFor(cluster))
+			writeMutationError(w, logger, fmt.Sprintf("%s node %q", verb, name), err, classifierFor(cluster))
 			return
 		}
 		writeJSON(w, logger, http.StatusOK, nodeScheduleResponse{Name: node.Name, Unschedulable: node.Spec.Unschedulable})
@@ -172,7 +172,7 @@ func DrainHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 		// Cordon first so nothing new schedules onto the node mid-drain.
 		if _, err := clientset.CoreV1().Nodes().Patch(ctx, name, types.StrategicMergePatchType,
 			cordonPatch(true), metav1.PatchOptions{}); err != nil {
-			writeMutationError(w, logger, fmt.Sprintf("cordoning node %q for drain", name), err, execGuidanceFor(cluster))
+			writeMutationError(w, logger, fmt.Sprintf("cordoning node %q for drain", name), err, classifierFor(cluster))
 			return
 		}
 
@@ -180,7 +180,7 @@ func DrainHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 			FieldSelector: fields.OneTermEqualSelector("spec.nodeName", name).String(),
 		})
 		if err != nil {
-			writeMutationError(w, logger, fmt.Sprintf("listing pods on node %q", name), err, execGuidanceFor(cluster))
+			writeMutationError(w, logger, fmt.Sprintf("listing pods on node %q", name), err, classifierFor(cluster))
 			return
 		}
 

@@ -206,7 +206,7 @@ func DiscoveryHandler(svc *DiscoveryService, cluster Cluster, logger *slog.Logge
 		refresh := r.URL.Query().Get("refresh") == "true"
 		result, err := svc.Get(refresh)
 		if err != nil {
-			writeEngineError(w, logger, "discovering resources", err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, "discovering resources", err, classifierFor(cluster))
 			return
 		}
 		writeJSON(w, logger, http.StatusOK, result)
