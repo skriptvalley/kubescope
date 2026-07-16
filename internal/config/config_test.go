@@ -110,14 +110,47 @@ func TestLoad(t *testing.T) {
 			wantErr: "KUBESCOPE_READ_ONLY",
 		},
 		{
-			name: "auth mode basic accepted",
-			env:  map[string]string{EnvAuthMode: "basic"},
-			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/home/u/.kube/config", AuthMode: "basic"},
+			name: "auth mode basic with credentials accepted",
+			env: map[string]string{
+				EnvAuthMode:          "basic",
+				EnvAuthBasicUsername: "admin",
+				EnvAuthBasicPassword: "s3cret",
+			},
+			want: Config{
+				ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/home/u/.kube/config",
+				AuthMode: "basic", BasicAuthUsername: "admin", BasicAuthPassword: "s3cret",
+			},
+		},
+		{
+			name:    "auth mode basic without credentials rejected",
+			env:     map[string]string{EnvAuthMode: "basic"},
+			wantErr: "requires both",
+		},
+		{
+			name: "auth mode basic with only username rejected",
+			env: map[string]string{
+				EnvAuthMode:          "basic",
+				EnvAuthBasicUsername: "admin",
+			},
+			wantErr: "requires both",
+		},
+		{
+			name:    "auth mode oidc not implemented",
+			env:     map[string]string{EnvAuthMode: "oidc"},
+			wantErr: "not implemented",
 		},
 		{
 			name:    "auth mode invalid",
 			env:     map[string]string{EnvAuthMode: "token"},
 			wantErr: "KUBESCOPE_AUTH_MODE",
+		},
+		{
+			name: "basic credentials ignored when mode is none",
+			env: map[string]string{
+				EnvAuthBasicUsername: "admin",
+				EnvAuthBasicPassword: "s3cret",
+			},
+			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/home/u/.kube/config", AuthMode: "none"},
 		},
 	}
 

@@ -48,8 +48,18 @@ type Options struct {
 	// middleware — the bypass-proof guardrail from ADR-0005. The UI reads the
 	// same flag from /api/v1/config to disable controls, but this is the control.
 	ReadOnly bool
-	// AuthMode is surfaced to the frontend via /api/v1/config (none|basic|oidc).
+	// AuthMode is surfaced to the frontend via /api/v1/config (none|basic) and
+	// selects the auth middleware. "basic" gates every route (except /healthz)
+	// with HTTP Basic auth using the credentials below (ADR-0005).
 	AuthMode string
+	// BasicAuthUsername/BasicAuthPassword are enforced when AuthMode is "basic".
+	// Never logged.
+	BasicAuthUsername string
+	BasicAuthPassword string
+	// ListenAddr is the configured bind address; the Host-allowlist middleware
+	// (DNS-rebinding protection, FB-3) derives its allowlist from it. Empty
+	// disables the Host check (used by router-only tests).
+	ListenAddr string
 	// Dist is the built SPA (index.html at its root).
 	Dist fs.FS
 }
@@ -61,6 +71,12 @@ func New(opts Options) http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(requestLogger(opts.Logger))
 	r.Use(middleware.Recoverer)
+	// Host-allowlist (FB-3) then auth (ADR-0005) run ahead of every route so a
+	// rebinding request is dropped, then an unauthenticated one is challenged,
+	// before any handler — including the SPA — is reached. /healthz is exempt
+	// from both.
+	r.Use(hostGuard(opts.ListenAddr))
+	r.Use(authGuard(opts.AuthMode, opts.BasicAuthUsername, opts.BasicAuthPassword, opts.Logger))
 
 	r.Get("/healthz", healthz)
 
