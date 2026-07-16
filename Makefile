@@ -45,7 +45,7 @@ test: ## Go unit tests + envtest under the race detector (downloads apiserver bi
 fe-test: web/node_modules ## vitest + React Testing Library suite
 	cd web && npm run test:run
 
-lint: ## Go + TS linters
+lint: web/node_modules ## Go + TS linters
 	@fmt_out="$$(gofmt -l $(GO_PKG_DIRS))"; if [ -n "$$fmt_out" ]; then \
 		echo "gofmt needed on:"; echo "$$fmt_out"; exit 1; fi
 	go vet ./...
