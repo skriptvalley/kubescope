@@ -20,5 +20,6 @@ One Claude Code session per sprint. Each `sprint-N.md` is a self-contained promp
 |---|---|
 | [_template.md](_template.md) | Skeleton every sprint prompt follows — copy it to create a new one |
 | `sprint-0.md` … `sprint-8.md` | One self-contained prompt per sprint; canonical plan in [docs/BUILD-PLAN.md](../docs/BUILD-PLAN.md) |
+| [feedback-cluster-connectivity-and-onboarding.md](feedback-cluster-connectivity-and-onboarding.md) | Post-v0.1.0 feedback mini-sprint: no-dead-end onboarding, failure taxonomy, runtime kubeconfig config, live cluster loss/return (FB-6) |
 
 Session rules (one sprint per session, ADR discipline, Definition of Done, STATUS.md updates) live in [CLAUDE.md](../CLAUDE.md).
