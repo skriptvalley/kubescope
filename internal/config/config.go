@@ -17,6 +17,11 @@ const (
 	EnvKubeconfig = "KUBESCOPE_KUBECONFIG"
 	EnvReadOnly   = "KUBESCOPE_READ_ONLY"
 	EnvAuthMode   = "KUBESCOPE_AUTH_MODE"
+	// Basic-auth credential source (Sprint 8, ADR-0005). Only consulted when
+	// KUBESCOPE_AUTH_MODE=basic; both are required in that mode. A single
+	// operator/password pair is the v1 credential model — see ADR-0005.
+	EnvAuthBasicUsername = "KUBESCOPE_AUTH_BASIC_USERNAME"
+	EnvAuthBasicPassword = "KUBESCOPE_AUTH_BASIC_PASSWORD"
 )
 
 const (
@@ -26,8 +31,9 @@ const (
 	fallbackKubeconfigRel = ".kube/config"
 )
 
-// AuthMode values accepted by KUBESCOPE_AUTH_MODE. basic/oidc are wired in
-// Sprint 8; the values are validated now so configs fail fast, not late.
+// AuthMode values accepted by KUBESCOPE_AUTH_MODE. `none` and `basic` ship in
+// v1; `oidc` is a reserved value that fails fast at startup (not implemented)
+// so a config asking for it errors loudly rather than silently running open.
 var validAuthModes = map[string]bool{"none": true, "basic": true, "oidc": true}
 
 // Config is the validated runtime configuration.
@@ -41,6 +47,10 @@ type Config struct {
 	ReadOnly bool
 	// AuthMode is one of none|basic|oidc.
 	AuthMode string
+	// BasicAuthUsername/BasicAuthPassword are the credentials enforced when
+	// AuthMode is "basic". Empty in every other mode. Never logged.
+	BasicAuthUsername string
+	BasicAuthPassword string
 }
 
 type deps struct {
@@ -102,11 +112,30 @@ func Load(opts ...Option) (Config, error) {
 		authMode = raw
 	}
 
+	// oidc is reserved but not implemented in v1: fail fast at startup rather
+	// than fall back to running open (ADR-0005).
+	if authMode == "oidc" {
+		return Config{}, fmt.Errorf("%s=oidc is not implemented in this release; use 'none' or 'basic'", EnvAuthMode)
+	}
+
+	var basicUser, basicPass string
+	if authMode == "basic" {
+		basicUser, _ = d.lookupEnv(EnvAuthBasicUsername)
+		basicPass, _ = d.lookupEnv(EnvAuthBasicPassword)
+		if basicUser == "" || basicPass == "" {
+			return Config{}, fmt.Errorf(
+				"%s=basic requires both %s and %s to be set (non-empty)",
+				EnvAuthMode, EnvAuthBasicUsername, EnvAuthBasicPassword)
+		}
+	}
+
 	return Config{
-		ListenAddr:     listenAddr,
-		KubeconfigPath: kubeconfigPath,
-		ReadOnly:       readOnly,
-		AuthMode:       authMode,
+		ListenAddr:        listenAddr,
+		KubeconfigPath:    kubeconfigPath,
+		ReadOnly:          readOnly,
+		AuthMode:          authMode,
+		BasicAuthUsername: basicUser,
+		BasicAuthPassword: basicPass,
 	}, nil
 }
 
