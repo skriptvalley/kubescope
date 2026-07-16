@@ -36,9 +36,11 @@ type fakeDiscoveryCluster struct {
 	activeErr error
 	disc      discovery.DiscoveryInterface
 	discErr   error
+	sourceGen int64
 }
 
 func (f *fakeDiscoveryCluster) ActiveContextName() (string, error) { return f.active, f.activeErr }
+func (f *fakeDiscoveryCluster) SourceGeneration() int64            { return f.sourceGen }
 func (f *fakeDiscoveryCluster) DiscoveryFor(string) (discovery.DiscoveryInterface, error) {
 	return f.disc, f.discErr
 }
@@ -201,13 +203,34 @@ func TestDiscoveryHandler(t *testing.T) {
 		assert.Equal(t, "kubeconfig_unavailable", errorCode(t, rec.Body.Bytes()))
 	})
 
-	t.Run("unreachable cluster is a structured 502", func(t *testing.T) {
+	t.Run("connection refused is classified 502 connection_refused", func(t *testing.T) {
 		disc := &countingDiscovery{err: errors.New("connection refused")}
 		svc, cluster := newSvcCluster(disc, "ctx-a", nil)
 		rec := httptest.NewRecorder()
 		DiscoveryHandler(svc, cluster, discardLogger())(rec, httptest.NewRequest(http.MethodGet, "/api/v1/discovery", nil))
 
 		assert.Equal(t, http.StatusBadGateway, rec.Code)
-		assert.Equal(t, "cluster_unreachable", errorCode(t, rec.Body.Bytes()))
+		assert.Equal(t, "connection_refused", errorCode(t, rec.Body.Bytes()))
 	})
+}
+
+// TestDiscoveryCacheIsGenerationScoped pins the runtime-kubeconfig-swap fix
+// (PR review): after a source swap, a same-named context must not be served
+// the old file's cached catalog — the cache key carries the source generation.
+func TestDiscoveryCacheIsGenerationScoped(t *testing.T) {
+	disc := &countingDiscovery{}
+	cluster := &fakeDiscoveryCluster{active: "ctx-a", disc: disc}
+	svc := NewDiscoveryService(cluster)
+
+	_, err := svc.Get(false)
+	require.NoError(t, err)
+	_, err = svc.Get(false)
+	require.NoError(t, err)
+	assert.Equal(t, 1, disc.calls, "same generation serves the cache")
+
+	// A kubeconfig swap bumps the generation: the same context name refetches.
+	cluster.sourceGen = 1
+	_, err = svc.Get(false)
+	require.NoError(t, err)
+	assert.Equal(t, 2, disc.calls, "a new generation must bypass the old cache entry")
 }

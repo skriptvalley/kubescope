@@ -21,53 +21,71 @@ func TestClassify(t *testing.T) {
 	tests := []struct {
 		name          string
 		err           error
-		usesExec      bool
+		hints         ClassifyHints
 		wantReachable bool
 		wantAuthOK    bool
+		wantReason    FailureClass
 		wantGuidance  bool
+		guidanceHas   string // substring the guidance must contain, if any
 	}{
 		{
 			name:          "unauthorized: server reachable, auth rejected",
 			err:           apierrors.NewUnauthorized("bad token"),
 			wantReachable: true,
 			wantAuthOK:    false,
+			wantReason:    FailAuthExpired,
+			wantGuidance:  true,
 		},
 		{
 			name:          "forbidden: server reachable, auth rejected",
 			err:           apierrors.NewForbidden(gr, "x", errors.New("nope")),
 			wantReachable: true,
 			wantAuthOK:    false,
+			wantReason:    FailForbidden,
+			wantGuidance:  true,
 		},
 		{
-			name:          "connection refused: unreachable",
+			name:          "connection refused: unreachable, guidance from taxonomy",
 			err:           errors.New("dial tcp 127.0.0.1:6443: connect: connection refused"),
+			hints:         ClassifyHints{LoopbackServer: true},
 			wantReachable: false,
 			wantAuthOK:    false,
+			wantReason:    FailConnectionRefused,
+			wantGuidance:  true,
+			guidanceHas:   "loopback",
 		},
 		{
 			name:          "auth failure surfaced as plain string",
 			err:           errors.New("the server has asked for the client to provide credentials (401 Unauthorized)"),
 			wantReachable: true,
 			wantAuthOK:    false,
+			wantReason:    FailAuthExpired,
+			wantGuidance:  true,
 		},
 		{
-			name:          "exec context always carries guidance",
+			name:          "opaque error on exec context still carries exec guidance",
 			err:           errors.New(`exec: "aws": executable file not found in $PATH`),
-			usesExec:      true,
+			hints:         ClassifyHints{ExecCommand: "aws"},
 			wantReachable: false,
+			wantReason:    FailUnknown,
 			wantGuidance:  true,
+			guidanceHas:   "ADR-0004",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := classify(tt.err, tt.usesExec, "aws")
+			h := classify(tt.err, tt.hints)
 			assert.Equal(t, tt.wantReachable, h.Reachable)
 			assert.Equal(t, tt.wantAuthOK, h.AuthOK)
 			assert.NotEmpty(t, h.Error)
+			assert.Equal(t, string(tt.wantReason), h.Reason)
 			if tt.wantGuidance {
-				assert.Contains(t, h.Guidance, "ADR-0004")
+				assert.NotEmpty(t, h.Guidance)
 			} else {
 				assert.Empty(t, h.Guidance)
+			}
+			if tt.guidanceHas != "" {
+				assert.Contains(t, h.Guidance, tt.guidanceHas)
 			}
 		})
 	}
@@ -136,7 +154,8 @@ func TestProbeAllExecFailureCarriesGuidance(t *testing.T) {
 
 	tokenHealth := byName["token-ctx"]
 	assert.False(t, tokenHealth.Reachable, "127.0.0.1:1 refuses the connection")
-	assert.Empty(t, tokenHealth.Guidance, "non-exec context gets no exec guidance")
+	assert.Equal(t, string(FailConnectionRefused), tokenHealth.Reason, "refused connection classifies as connection_refused")
+	assert.NotContains(t, tokenHealth.Guidance, "exec credential plugin", "non-exec context gets no exec guidance")
 }
 
 func TestProbeAllMalformedConfig(t *testing.T) {

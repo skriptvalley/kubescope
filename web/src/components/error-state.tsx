@@ -24,6 +24,7 @@ export function ErrorState({
   const heading = errorTitle(error, title ?? "Something went wrong");
   const detail = apiError ? `${apiError.message} (${apiError.code})` : error.message;
   const guidance = apiError?.guidance;
+  const docURL = apiError?.docURL;
 
   return (
     <Alert variant="destructive" data-testid="error-state">
@@ -33,6 +34,18 @@ export function ErrorState({
         <div className="space-y-2">
           <p className="break-words">{detail}</p>
           {guidance && <p className="text-xs opacity-90">{guidance}</p>}
+          {docURL && (
+            <p>
+              <a
+                href={docURL}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-medium underline underline-offset-2"
+              >
+                Learn more
+              </a>
+            </p>
+          )}
           {onRetry && (
             <Button variant="outline" size="sm" onClick={onRetry}>
               <RefreshCw className="h-3.5 w-3.5" />

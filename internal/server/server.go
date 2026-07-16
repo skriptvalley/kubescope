@@ -52,6 +52,10 @@ type Options struct {
 	// selects the auth middleware. "basic" gates every route (except /healthz)
 	// with HTTP Basic auth using the credentials below (ADR-0005).
 	AuthMode string
+	// AllowKubeconfigSet enables the runtime set-kubeconfig endpoint (ADR-0007).
+	// When false the endpoint 403s; the setup endpoint reports canSetKubeconfig
+	// accordingly. Read-only mode keeps the control off regardless.
+	AllowKubeconfigSet bool
 	// BasicAuthUsername/BasicAuthPassword are enforced when AuthMode is "basic".
 	// Never logged.
 	BasicAuthUsername string
@@ -94,11 +98,26 @@ func New(opts Options) http.Handler {
 		// enumeration and is shared by the discovery and generic get/list
 		// handlers so GVR resolution reuses the same cache (ADR-0003).
 		disco := resources.NewDiscoveryService(opts.Kube)
+		// The stream hub is built before the routes so the health/setup probes
+		// can feed it: a failed probe marks that context's informers unreachable
+		// (FB-6 Story D — a silently dead watch may never error on its own).
+		var hub *stream.Hub
+		if opts.Stream != nil {
+			// The object sanitizer masks Secret data on detail streams so a
+			// watched Secret is redacted server-side, matching the REST views
+			// (ADR-0005) — the SSE detail object is a render path too.
+			hub = stream.NewHub(opts.Stream, resources.ShapeStreamRow, opts.Logger,
+				stream.WithObjectSanitizer(resources.MaskStreamObject))
+		}
+		var onHealth resources.HealthObserver
+		if hub != nil {
+			onHealth = hub.SyncContextHealth
+		}
 		api.Route("/v1", func(v1 chi.Router) {
 			v1.Get("/nodes", resources.NodesHandler(opts.Kube, opts.Logger))
 			v1.Get("/contexts", resources.ContextsHandler(opts.Kube, opts.Logger))
 			v1.Post("/contexts/switch", resources.SwitchContextHandler(opts.Kube, opts.Logger))
-			v1.Get("/contexts/health", resources.HealthHandler(opts.Kube, opts.Logger))
+			v1.Get("/contexts/health", resources.HealthHandler(opts.Kube, opts.Logger, onHealth))
 			v1.Get("/overview", resources.OverviewHandler(opts.Kube, opts.Logger))
 			v1.Get("/namespaces", resources.NamespacesHandler(opts.Kube, opts.Logger))
 			v1.Get("/discovery", resources.DiscoveryHandler(disco, opts.Kube, opts.Logger))
@@ -106,6 +125,11 @@ func New(opts Options) http.Handler {
 			// cluster, so it answers even when no cluster is reachable (ADR-0005).
 			v1.Get("/config", resources.ConfigHandler(
 				resources.ServerConfig{ReadOnly: opts.ReadOnly, AuthMode: opts.AuthMode}, opts.Logger))
+			// First-run / connectivity posture the UI gates on (FB-6, ADR-0007).
+			// Unguarded and cluster-independent, so it answers even with no
+			// kubeconfig; canSetKubeconfig is reported false under read-only.
+			v1.Get("/setup", resources.SetupStateHandler(
+				opts.Kube, opts.AllowKubeconfigSet && !opts.ReadOnly, opts.Logger, onHealth))
 			// Generic resource engine: any GVR via the dynamic client. The
 			// core group travels as the literal token "core" in the path.
 			v1.Get("/resources/{group}/{version}/{resource}", resources.ListHandler(opts.Kube, disco, opts.Logger))
@@ -149,6 +173,10 @@ func New(opts Options) http.Handler {
 			// registered outside this group.
 			v1.Group(func(m chi.Router) {
 				m.Use(readOnlyGuard(opts.ReadOnly))
+				// Repointing the kubeconfig source at runtime is a mutation of
+				// server state (ADR-0007), so it lives behind the read-only guard;
+				// the AllowKubeconfigSet flag gates it further inside the handler.
+				m.Put("/kubeconfig", resources.SetKubeconfigHandler(opts.Kube, opts.AllowKubeconfigSet, opts.Logger))
 				m.Put("/resources/{group}/{version}/{resource}/{name}", resources.UpdateHandler(opts.Kube, disco, opts.Logger))
 				m.Delete("/resources/{group}/{version}/{resource}/{name}", resources.DeleteHandler(opts.Kube, disco, opts.Logger))
 				m.Post("/workloads/{resource}/{namespace}/{name}/scale", resources.ScaleHandler(opts.Kube, opts.Logger))
@@ -171,13 +199,9 @@ func New(opts Options) http.Handler {
 			// Live updates (Sprint 4, ADR-0006): a shared informer per
 			// context+GVR fans watch events out over SSE, and pod logs follow
 			// over the same transport. Registered only when a stream backend is
-			// wired (production always is; router-only tests skip it).
-			if opts.Stream != nil {
-				// The object sanitizer masks Secret data on detail streams so a
-				// watched Secret is redacted server-side, matching the REST views
-				// (ADR-0005) — the SSE detail object is a render path too.
-				hub := stream.NewHub(opts.Stream, resources.ShapeStreamRow, opts.Logger,
-					stream.WithObjectSanitizer(resources.MaskStreamObject))
+			// wired (production always is; router-only tests skip it). The hub
+			// itself is built above so the health/setup probes can feed it.
+			if hub != nil {
 				v1.Get("/stream/resources/{group}/{version}/{resource}", stream.StreamHandler(hub, opts.Logger))
 				v1.Get("/stream/pods/{namespace}/{name}/logs", stream.LogsHandler(opts.Stream, opts.Logger))
 			}

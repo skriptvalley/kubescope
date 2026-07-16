@@ -152,6 +152,27 @@ func TestLoad(t *testing.T) {
 			},
 			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/home/u/.kube/config", AuthMode: "none"},
 		},
+		{
+			name: "allow kubeconfig set defaults to false",
+			env:  map[string]string{},
+			want: Config{
+				ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/home/u/.kube/config",
+				AuthMode: "none", AllowKubeconfigSet: false,
+			},
+		},
+		{
+			name: "allow kubeconfig set true",
+			env:  map[string]string{EnvAllowKubeconfigSet: "true"},
+			want: Config{
+				ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/home/u/.kube/config",
+				AuthMode: "none", AllowKubeconfigSet: true,
+			},
+		},
+		{
+			name:    "allow kubeconfig set invalid",
+			env:     map[string]string{EnvAllowKubeconfigSet: "maybe"},
+			wantErr: "KUBESCOPE_ALLOW_KUBECONFIG_SET",
+		},
 	}
 
 	for _, tt := range tests {

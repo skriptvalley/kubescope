@@ -4,8 +4,9 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Overview } from "@/lib/api";
+import { connectivity } from "@/lib/connectivity";
 
-import { useSwitchContext } from "./use-contexts";
+import { healthRefetchInterval, useSwitchContext } from "./use-contexts";
 import { useOverview } from "./use-overview";
 
 const switchMock = vi.hoisted(() => vi.fn());
@@ -34,6 +35,16 @@ beforeEach(() => {
   overviewMock.mockReset();
 });
 afterEach(() => vi.restoreAllMocks());
+
+describe("healthRefetchInterval", () => {
+  afterEach(() => connectivity.resetForTests());
+
+  it("polls every 30s when reachable, backing off to 60s when unreachable", () => {
+    expect(healthRefetchInterval()).toBe(30_000);
+    connectivity.setActiveUnreachable(true);
+    expect(healthRefetchInterval()).toBe(60_000);
+  });
+});
 
 describe("useSwitchContext", () => {
   it("refetches a mounted cluster view in place on switch (no manual refresh needed)", async () => {

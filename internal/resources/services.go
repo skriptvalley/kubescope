@@ -82,7 +82,7 @@ func ServiceDetailHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc
 		ctx := r.Context()
 		svc, err := clientset.CoreV1().Services(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
-			writeEngineError(w, logger, fmt.Sprintf("getting service %q", name), err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, fmt.Sprintf("getting service %q", name), err, classifierFor(cluster))
 			return
 		}
 
@@ -93,7 +93,7 @@ func ServiceDetailHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc
 		case apierrors.IsNotFound(err):
 			// No Endpoints object: headless or no backing pods. Not an error.
 		case err != nil:
-			writeEngineError(w, logger, fmt.Sprintf("resolving endpoints for service %q", name), err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, fmt.Sprintf("resolving endpoints for service %q", name), err, classifierFor(cluster))
 			return
 		default:
 			detail.EndpointsFound = true

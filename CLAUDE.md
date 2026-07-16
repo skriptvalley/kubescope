@@ -23,7 +23,7 @@ Key docs: [docs/PRD.md](docs/PRD.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE
 | Packaging | Single Go binary embedding built FE via `embed.FS`; multi-stage Dockerfile; multi-arch amd64 + arm64 |
 | Testing | Go: table-driven + testify, controller-runtime envtest; FE: vitest + React Testing Library, Playwright later; kind for integration/smoke |
 
-Go module: `github.com/skriptvalley/kubescope`. Image: `ghcr.io/skriptvalley/kubescope:latest`. Env vars are prefixed `KUBESCOPE_` — canonical set only: `KUBESCOPE_LISTEN_ADDR`, `KUBESCOPE_PORT`, `KUBESCOPE_KUBECONFIG`, `KUBESCOPE_READ_ONLY`, `KUBESCOPE_AUTH_MODE`, and the basic-auth credential pair `KUBESCOPE_AUTH_BASIC_USERNAME` / `KUBESCOPE_AUTH_BASIC_PASSWORD` (added Sprint 8, recorded in ADR-0005; consulted only when `KUBESCOPE_AUTH_MODE=basic`). Do not invent new env vars beyond this set.
+Go module: `github.com/skriptvalley/kubescope`. Image: `ghcr.io/skriptvalley/kubescope:latest`. Env vars are prefixed `KUBESCOPE_` — canonical set only: `KUBESCOPE_LISTEN_ADDR`, `KUBESCOPE_PORT`, `KUBESCOPE_KUBECONFIG`, `KUBESCOPE_READ_ONLY`, `KUBESCOPE_AUTH_MODE`, the basic-auth credential pair `KUBESCOPE_AUTH_BASIC_USERNAME` / `KUBESCOPE_AUTH_BASIC_PASSWORD` (added Sprint 8, recorded in ADR-0005; consulted only when `KUBESCOPE_AUTH_MODE=basic`), and `KUBESCOPE_ALLOW_KUBECONFIG_SET` (added FB-6, recorded in ADR-0007; default `false`, gates the runtime set-kubeconfig endpoint). Do not invent new env vars beyond this set.
 
 ## Repo map
 

@@ -9,7 +9,7 @@ GO_PKG_DIRS       = $(shell go list -f '{{.Dir}}' ./...)
 
 .PHONY: dev dev-backend build test lint docker-build docker-build-local docker-run \
         fe-dev fe-build fe-test kind-up kind-down smoke help \
-        testenv-up testenv-down testenv-status
+        testenv-up testenv-down testenv-status testenv-run testenv-run-docker
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-20s %s\n", $$1, $$2}'
@@ -85,3 +85,9 @@ testenv-down: ## Tear down the local test environment
 
 testenv-status: ## Show the local test environment status
 	deploy/testenv/testenv.sh status
+
+testenv-run: ## Build (if needed) and run kubescope (native) against the test environment
+	deploy/testenv/testenv.sh run
+
+testenv-run-docker: ## Run the kubescope container image against the test environment
+	deploy/testenv/testenv.sh run --docker

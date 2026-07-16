@@ -42,7 +42,7 @@ func OwnedPodsHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 				writeError(w, logger, http.StatusNotFound, "unknown_workload", unknown.Error())
 				return
 			}
-			writeEngineError(w, logger, fmt.Sprintf("resolving pods for %s %q", resource, name), err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, fmt.Sprintf("resolving pods for %s %q", resource, name), err, classifierFor(cluster))
 			return
 		}
 		writeJSON(w, logger, http.StatusOK, workloadList[PodSummary]{Items: pods})
@@ -74,12 +74,12 @@ func OwnedJobsHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 		ctx := r.Context()
 		cronJob, err := clientset.BatchV1().CronJobs(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
-			writeEngineError(w, logger, fmt.Sprintf("getting cronjob %q", name), err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, fmt.Sprintf("getting cronjob %q", name), err, classifierFor(cluster))
 			return
 		}
 		jobList, err := clientset.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			writeEngineError(w, logger, fmt.Sprintf("listing jobs for cronjob %q", name), err, execGuidanceFor(cluster))
+			writeEngineError(w, logger, fmt.Sprintf("listing jobs for cronjob %q", name), err, classifierFor(cluster))
 			return
 		}
 		items := make([]JobSummary, 0)

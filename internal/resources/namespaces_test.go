@@ -45,7 +45,7 @@ func TestNamespacesHandler(t *testing.T) {
 		assert.Equal(t, "kubeconfig_unavailable", errorCode(t, rec.Body.Bytes()))
 	})
 
-	t.Run("unreachable cluster is a structured 502", func(t *testing.T) {
+	t.Run("connection refused is classified 502 connection_refused", func(t *testing.T) {
 		cs := fake.NewClientset()
 		cs.PrependReactor("list", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, errors.New("connection refused")
@@ -55,6 +55,6 @@ func TestNamespacesHandler(t *testing.T) {
 		NamespacesHandler(cluster, discardLogger())(rec, httptest.NewRequest(http.MethodGet, "/api/v1/namespaces", nil))
 
 		assert.Equal(t, http.StatusBadGateway, rec.Code)
-		assert.Equal(t, "cluster_unreachable", errorCode(t, rec.Body.Bytes()))
+		assert.Equal(t, "connection_refused", errorCode(t, rec.Body.Bytes()))
 	})
 }

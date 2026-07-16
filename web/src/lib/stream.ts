@@ -6,12 +6,22 @@
 
 export type StreamStatus = "connecting" | "live" | "stale";
 
+/** Connectivity transition carried by a "status" watch event (FB-6 Story D).
+ *  The backend emits one on reachable⇄unreachable transitions per stream. */
+export interface StatusInfo {
+  state: "unreachable" | "connected";
+  reason?: string;
+  message?: string;
+  guidance?: string;
+}
+
 /** One watch notification off the resource stream (mirrors internal/stream). */
 export interface WatchEvent {
-  type: "add" | "update" | "delete" | "resync";
+  type: "add" | "update" | "delete" | "resync" | "status";
   row?: unknown;
   object?: Record<string, unknown>;
   ref?: { name: string; namespace?: string; uid?: string };
+  status?: StatusInfo;
 }
 
 export interface StreamCallbacks {

@@ -13,30 +13,43 @@ import {
   type StreamGVR,
   type WorkloadSummary,
 } from "@/lib/api";
+import { connectivity } from "@/lib/connectivity";
 import { queryKeys } from "@/lib/query-keys";
-import { openStream, type StreamStatus, type WatchEvent } from "@/lib/stream";
+import { openStream, type StatusInfo, type StreamStatus, type WatchEvent } from "@/lib/stream";
 
 export type { StreamStatus } from "@/lib/stream";
 
-/** Poll cadence used only while the SSE stream is not live (the ADR-0006
- *  degradation path). A live stream sets refetchInterval to false. */
-const POLL_INTERVAL_MS = 10_000;
+/** Base/max poll cadence used only while the SSE stream is not live (the ADR-0006
+ *  degradation path). A live stream sets refetchInterval to false. While not
+ *  live the interval grows exponentially with consecutive fetch failures (FB-6
+ *  Story D) so a down cluster is not hammered at full cadence. */
+const POLL_BASE_MS = 10_000;
+const POLL_MAX_MS = 60_000;
 
-function pollFor(status: StreamStatus): number | false {
-  return status === "live" ? false : POLL_INTERVAL_MS;
+/** Failure reasons scoped to one resource/credential rather than the whole
+ *  cluster: they must not raise the app-wide unreachable banner. */
+const SCOPED_REASONS = new Set(["forbidden", "auth_expired"]);
+
+/** Exported for unit tests. `fetchFailureCount` comes from the query's own state
+ *  (`query.state.fetchFailureCount`); it resets to 0 on any successful fetch. */
+export function pollFor(status: StreamStatus, fetchFailureCount = 0): number | false {
+  if (status === "live") return false;
+  return Math.min(POLL_BASE_MS * 2 ** fetchFailureCount, POLL_MAX_MS);
 }
 
 /** Subscribes to a resource watch stream, routing events and resyncs to the
  *  caller via always-current refs (so the SSE connection is not torn down on
- *  every render). Returns the live connection status. When disabled, no stream
- *  is opened. */
+ *  every render). Returns the live connection status plus the current
+ *  connectivity `StatusInfo` (non-null while the backend reports the cluster
+ *  unreachable, FB-6 Story D). When disabled, no stream is opened. */
 function useWatchStream(
   gvr: StreamGVR,
   filter: StreamFilter,
   handlers: { onEvent: (event: WatchEvent) => void; onResync: () => void },
   enabled = true,
-): StreamStatus {
+): { status: StreamStatus; unreachable: StatusInfo | null } {
   const [status, setStatus] = useState<StreamStatus>("connecting");
+  const [unreachable, setUnreachable] = useState<StatusInfo | null>(null);
   const onEventRef = useRef(handlers.onEvent);
   const onResyncRef = useRef(handlers.onResync);
   onEventRef.current = handlers.onEvent;
@@ -54,6 +67,27 @@ function useWatchStream(
         } catch {
           return;
         }
+        if (event.type === "status") {
+          const info = event.status;
+          if (!info) return;
+          if (info.state === "unreachable") {
+            setUnreachable(info);
+            // Only cluster-level failures flip the app-wide banner. A 403/401
+            // on ONE resource's watch is scoped to that resource (the FB-6
+            // matrix: "insufficient permissions for this resource, not a
+            // global failure") — the view's own error surface covers it.
+            if (!SCOPED_REASONS.has(info.reason ?? "")) {
+              connectivity.setActiveUnreachable(true);
+            }
+          } else {
+            setUnreachable(null);
+            connectivity.setActiveUnreachable(false);
+            // Recovery: the backend also sends a resync, but invalidate here too
+            // so a clean baseline is refetched even if the resync is missed.
+            onResyncRef.current();
+          }
+          return;
+        }
         if (event.type === "resync") onResyncRef.current();
         else onEventRef.current(event);
       },
@@ -62,7 +96,7 @@ function useWatchStream(
     });
   }, [url, enabled]);
 
-  return status;
+  return { status, unreachable };
 }
 
 // --- Cache-patch helpers (in-place, no full refetch) -------------------------
@@ -141,7 +175,7 @@ export function useLiveResourceList(ref: ResourceRef) {
   const gvr: StreamGVR = { group: ref.group, version: ref.version, resource: ref.resource };
   const missed = useRef(false);
 
-  const status = useWatchStream(
+  const { status, unreachable } = useWatchStream(
     gvr,
     { namespace: ref.namespace },
     {
@@ -158,10 +192,10 @@ export function useLiveResourceList(ref: ResourceRef) {
   const query = useQuery({
     queryKey: key,
     queryFn: () => api.resources.list(ref),
-    refetchInterval: pollFor(status),
+    refetchInterval: (q) => pollFor(status, q.state.fetchFailureCount),
   });
   useFlushMissedEvents(queryClient, key, query.isSuccess, missed);
-  return { ...query, streamStatus: status };
+  return { ...query, streamStatus: status, unreachable };
 }
 
 /** A typed workload summary list that live-patches server-shaped rows from the
@@ -175,7 +209,7 @@ export function useLiveWorkloadSummary<T extends WorkloadSummary>(
   const key = queryKeys.workloadSummary(resource, namespace);
   const missed = useRef(false);
 
-  const status = useWatchStream(
+  const { status, unreachable } = useWatchStream(
     gvr,
     { namespace },
     {
@@ -190,10 +224,10 @@ export function useLiveWorkloadSummary<T extends WorkloadSummary>(
   const query = useQuery({
     queryKey: key,
     queryFn: () => api.workloads.list<T>(resource, namespace),
-    refetchInterval: pollFor(status),
+    refetchInterval: (q) => pollFor(status, q.state.fetchFailureCount),
   });
   useFlushMissedEvents(queryClient, key, query.isSuccess, missed);
-  return { ...query, streamStatus: status };
+  return { ...query, streamStatus: status, unreachable };
 }
 
 /** A single object that live-updates from the watch stream (detail views).
@@ -212,7 +246,7 @@ export function useLiveResourceObject(ref: ResourceRef, enabled = true) {
     setDeleted(false);
   }, [ref.namespace, ref.name]);
 
-  const status = useWatchStream(
+  const { status, unreachable } = useWatchStream(
     gvr,
     { namespace: ref.namespace, name: ref.name, detail: true },
     {
@@ -234,9 +268,9 @@ export function useLiveResourceObject(ref: ResourceRef, enabled = true) {
     enabled,
     // Poll fallback while the stream is not live (AC 4.2), but not after the
     // object is gone — there is nothing to poll for.
-    refetchInterval: deleted ? false : pollFor(status),
+    refetchInterval: (q) => (deleted ? false : pollFor(status, q.state.fetchFailureCount)),
   });
-  return { ...query, streamStatus: status, deleted };
+  return { ...query, streamStatus: status, deleted, unreachable };
 }
 
 /** The live events feed (cluster-wide or per-namespace). Initial paint + poll
@@ -248,7 +282,7 @@ export function useEventsFeed(namespace?: string) {
   const gvr: StreamGVR = { group: "core", version: "v1", resource: "events" };
   const missed = useRef(false);
 
-  const status = useWatchStream(
+  const { status, unreachable } = useWatchStream(
     gvr,
     { namespace },
     {
@@ -265,10 +299,10 @@ export function useEventsFeed(namespace?: string) {
   const query = useQuery({
     queryKey: key,
     queryFn: () => api.eventsFeed(namespace),
-    refetchInterval: pollFor(status),
+    refetchInterval: (q) => pollFor(status, q.state.fetchFailureCount),
   });
   useFlushMissedEvents(queryClient, key, query.isSuccess, missed);
-  return { ...query, streamStatus: status };
+  return { ...query, streamStatus: status, unreachable };
 }
 
 /** Newest-first by last-seen. RFC3339 UTC timestamps sort lexicographically. */

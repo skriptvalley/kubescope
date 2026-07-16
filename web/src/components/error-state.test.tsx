@@ -37,4 +37,21 @@ describe("ErrorState", () => {
     );
     expect(screen.getByTestId("error-state")).toHaveTextContent("check your VPN");
   });
+
+  it("renders a Learn more link when the ApiError carries a docURL", () => {
+    render(
+      <ErrorState
+        error={new ApiError("bad cert", "tls_cert", 502, "fix the CA", "https://docs.example/adr-0004")}
+      />,
+    );
+    const link = screen.getByRole("link", { name: /learn more/i });
+    expect(link).toHaveAttribute("href", "https://docs.example/adr-0004");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noreferrer");
+  });
+
+  it("omits the Learn more link when no docURL is present", () => {
+    render(<ErrorState error={new ApiError("down", "cluster_unreachable", 502)} />);
+    expect(screen.queryByRole("link", { name: /learn more/i })).toBeNull();
+  });
 });

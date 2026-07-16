@@ -35,6 +35,17 @@ type fakeCluster struct {
 	dynamicErr   error
 	discovery    discovery.DiscoveryInterface
 	discoveryErr error
+	// FB-6 additions. execCmd/loopback are the classification hints
+	// ClassifyActiveError feeds the real kube.ClassifyError, so handler tests
+	// exercise the actual taxonomy. kubeconfigPath/probeHealth/setErr drive the
+	// setup-state and set-kubeconfig handlers; setPath captures the last set.
+	execCmd        string
+	loopback       bool
+	kubeconfigPath string
+	probeHealth    kube.ContextHealth
+	setErr         error
+	setPath        string
+	sourceGen      int64
 }
 
 func (f *fakeCluster) Clientset() (kubernetes.Interface, error) { return f.clientset, f.clientsetErr }
@@ -48,6 +59,20 @@ func (f *fakeCluster) DiscoveryFor(string) (discovery.DiscoveryInterface, error)
 }
 func (f *fakeCluster) ProbeAll(context.Context) ([]kube.ContextHealth, error) {
 	return f.health, f.healthErr
+}
+func (f *fakeCluster) KubeconfigPath() string { return f.kubeconfigPath }
+func (f *fakeCluster) SetKubeconfigPath(path string) error {
+	f.setPath = path
+	if f.setErr != nil {
+		return f.setErr
+	}
+	f.kubeconfigPath = path
+	return nil
+}
+func (f *fakeCluster) ProbeContext(context.Context, string) kube.ContextHealth { return f.probeHealth }
+func (f *fakeCluster) SourceGeneration() int64                                 { return f.sourceGen }
+func (f *fakeCluster) ClassifyActiveError(err error) kube.Classification {
+	return kube.ClassifyError(err, kube.ClassifyHints{ExecCommand: f.execCmd, LoopbackServer: f.loopback})
 }
 
 func errorCode(t *testing.T, body []byte) string {
@@ -166,7 +191,7 @@ func TestHealthHandler(t *testing.T) {
 			{Name: "b", Reachable: false, Error: "connection refused"},
 		}}
 		rec := httptest.NewRecorder()
-		HealthHandler(cluster, discardLogger())(rec, httptest.NewRequest(http.MethodGet, "/api/v1/contexts/health", nil))
+		HealthHandler(cluster, discardLogger(), nil)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/contexts/health", nil))
 
 		require.Equal(t, http.StatusOK, rec.Code)
 		var body struct {
@@ -181,9 +206,41 @@ func TestHealthHandler(t *testing.T) {
 	t.Run("kubeconfig error is structured 503", func(t *testing.T) {
 		cluster := &fakeCluster{healthErr: errors.New("loading kubeconfig: boom")}
 		rec := httptest.NewRecorder()
-		HealthHandler(cluster, discardLogger())(rec, httptest.NewRequest(http.MethodGet, "/api/v1/contexts/health", nil))
+		HealthHandler(cluster, discardLogger(), nil)(rec, httptest.NewRequest(http.MethodGet, "/api/v1/contexts/health", nil))
 
 		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 		assert.Equal(t, "kubeconfig_unavailable", errorCode(t, rec.Body.Bytes()))
 	})
+}
+
+// TestHealthHandlerNotifiesObserver pins that every probe result reaches the
+// observer (the server wires it to the stream hub, FB-6 Story D).
+func TestHealthHandlerNotifiesObserver(t *testing.T) {
+	cluster := &fakeCluster{health: []kube.ContextHealth{
+		{Name: "a", Reachable: true, AuthOK: true},
+		{Name: "b", Reason: "connection_refused", Error: "refused"},
+	}}
+	var seen []string
+	rec := httptest.NewRecorder()
+	HealthHandler(cluster, discardLogger(), func(h kube.ContextHealth) { seen = append(seen, h.Name) })(
+		rec, httptest.NewRequest(http.MethodGet, "/api/v1/contexts/health", nil))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, []string{"a", "b"}, seen)
+}
+
+// TestHealthHandlerSkipsObserverOnCanceledRequest pins the PR-review fix: a
+// probe run under an already-canceled request context says nothing about the
+// cluster, so it must never be synced into the watch layer as an outage.
+func TestHealthHandlerSkipsObserverOnCanceledRequest(t *testing.T) {
+	cluster := &fakeCluster{health: []kube.ContextHealth{{Name: "a", Error: "context canceled"}}}
+	notified := 0
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/contexts/health", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	rec := httptest.NewRecorder()
+	HealthHandler(cluster, discardLogger(), func(kube.ContextHealth) { notified++ })(rec, req.WithContext(ctx))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Zero(t, notified, "a canceled request's probe results must not reach the observer")
 }

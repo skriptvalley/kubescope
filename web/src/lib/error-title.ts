@@ -11,6 +11,16 @@ const CODE_TITLES: Record<string, string> = {
   invalid_scope: "Invalid namespace scope",
   kubeconfig_unavailable: "Kubeconfig unavailable",
   cluster_unreachable: "Cluster unreachable",
+  // FB-6 failure taxonomy codes.
+  connection_refused: "Connection refused",
+  dns: "DNS lookup failed",
+  tls_cert: "TLS verification failed",
+  exec_plugin_missing: "Credential plugin unavailable",
+  auth_expired: "Authentication expired",
+  timeout: "Cluster timed out",
+  apiserver_5xx: "API server error",
+  kubeconfig_invalid: "Invalid kubeconfig",
+  kubeconfig_set_disabled: "Runtime kubeconfig disabled",
 };
 
 /** Resolves a friendly heading for an error, preferring the ApiError code map
