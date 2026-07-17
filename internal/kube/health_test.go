@@ -136,7 +136,7 @@ func TestProbeAllExecFailureCarriesGuidance(t *testing.T) {
 		},
 		CurrentContext: "token-ctx",
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 
 	health, err := m.ProbeAll(context.Background())
 	require.NoError(t, err)
@@ -159,7 +159,7 @@ func TestProbeAllExecFailureCarriesGuidance(t *testing.T) {
 }
 
 func TestProbeAllMalformedConfig(t *testing.T) {
-	m := NewManager(filepath.Join(t.TempDir(), "absent"))
+	m := newManager(filepath.Join(t.TempDir(), "absent"))
 	_, err := m.ProbeAll(context.Background())
 	require.Error(t, err)
 }
@@ -178,7 +178,7 @@ func TestExecGuidanceMethod(t *testing.T) {
 		},
 		CurrentContext: "token-ctx",
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 	assert.Contains(t, m.ExecGuidance("exec-ctx"), "ADR-0004")
 	assert.Empty(t, m.ExecGuidance("token-ctx"), "non-exec context yields no guidance")
 	assert.Empty(t, m.ExecGuidance("missing"))
@@ -233,7 +233,7 @@ func TestProbeAllConcurrentAndTimesOut(t *testing.T) {
 		},
 		CurrentContext: "ctx-a",
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 	m.probeTimeout = 500 * time.Millisecond
 
 	// Safety net: if the per-probe timeout were removed, the black-hole would

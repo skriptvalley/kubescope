@@ -33,11 +33,15 @@ type Cluster interface {
 	// and the fetched client cannot diverge under a concurrent switch.
 	Dynamic() (dynamic.Interface, error)
 	DiscoveryFor(name string) (discovery.DiscoveryInterface, error)
-	// KubeconfigPath and SetKubeconfigPath expose the runtime kubeconfig source
-	// (ADR-0007): setup state reports the path, and the set-kubeconfig endpoint
-	// repoints the Manager at a validated file.
-	KubeconfigPath() string
-	SetKubeconfigPath(path string) error
+	// Sources, SourcePaths, AddSource and RemoveSource expose the kubeconfig
+	// source registry (ADR-0008): setup state reports the registered paths, the
+	// listing endpoint reports per-source expansion, and the mutation endpoints
+	// register/drop runtime sources. A runtime add/remove replaces 0007's single
+	// set-kubeconfig swap.
+	Sources() []kube.SourceStatus
+	SourcePaths() []string
+	AddSource(path string) error
+	RemoveSource(id string) error
 	// ProbeContext probes one named context's connectivity for the setup-state
 	// resolver; ClassifyActiveError sorts a cluster-side error into the failure
 	// taxonomy so error envelopes carry a precise reason and remediation (FB-6).

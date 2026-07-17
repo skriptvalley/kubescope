@@ -34,7 +34,7 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	mgr := kube.NewManager(cfg.KubeconfigPath)
+	mgr := kube.NewManager(cfg.KubeconfigSources)
 
 	// Sprint 6: exec sessions and port-forwards are per-context live sessions.
 	// They must not outlive their context, so a context switch tears down every
@@ -82,7 +82,7 @@ func run(logger *slog.Logger) error {
 	go func() {
 		logger.Info("kubescope starting",
 			"listen_addr", cfg.ListenAddr,
-			"kubeconfig", cfg.KubeconfigPath,
+			"kubeconfig_sources", cfg.KubeconfigSources,
 			"read_only", cfg.ReadOnly,
 			"auth_mode", cfg.AuthMode,
 		)

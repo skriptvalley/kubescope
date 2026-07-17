@@ -1,6 +1,7 @@
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { KubeconfigSourcesDialog } from "@/components/kubeconfig-sources";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,16 +9,19 @@ import {
   useContextsHealth,
   useSwitchContext,
 } from "@/hooks/use-contexts";
+import { useSetupState } from "@/hooks/use-setup";
 import { ApiError } from "@/lib/api";
 import { healthBadge } from "@/lib/context-health";
 import { cn } from "@/lib/utils";
 
 export function ContextSwitcher() {
   const [open, setOpen] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const { data: contexts, isPending, isError } = useContexts();
   const { data: health, isPending: healthPending } = useContextsHealth();
+  const { data: setup } = useSetupState();
   const switchContext = useSwitchContext();
 
   // Close on Escape (restoring focus to the trigger) or an outside click.
@@ -41,11 +45,18 @@ export function ContextSwitcher() {
   }, [open]);
 
   if (isError) {
-    return <span className="text-sm text-destructive">kubeconfig error</span>;
+    // FB-9: a genuine mid-session error (setup ready) stays red; before the
+    // server has a usable cluster (any non-ready state, incl. loading) the
+    // switcher is just idle, so show a neutral muted label instead of alarm.
+    if (setup?.state === "ready") {
+      return <span className="text-sm text-destructive">kubeconfig error</span>;
+    }
+    return <span className="text-sm text-muted-foreground">no cluster</span>;
   }
 
   const active = contexts?.find((c) => c.active);
   const healthByName = new Map((health ?? []).map((h) => [h.name, h]));
+  const canManage = setup?.canSetKubeconfig ?? false;
 
   const label = switchContext.isPending
     ? "Switching…"
@@ -102,6 +113,24 @@ export function ContextSwitcher() {
               </li>
             );
           })}
+          {canManage && (
+            <>
+              <li role="separator" aria-hidden="true" className="my-1 h-px bg-border" />
+              <li>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                  onClick={() => {
+                    setOpen(false);
+                    setManageOpen(true);
+                  }}
+                >
+                  <Settings className="h-4 w-4 shrink-0 opacity-70" />
+                  Manage kubeconfig sources
+                </button>
+              </li>
+            </>
+          )}
         </ul>
       )}
       {switchContext.isError && (
@@ -109,6 +138,7 @@ export function ContextSwitcher() {
           Switch failed: {switchError(switchContext.error)}
         </p>
       )}
+      {manageOpen && <KubeconfigSourcesDialog onClose={() => setManageOpen(false)} />}
     </div>
   );
 }

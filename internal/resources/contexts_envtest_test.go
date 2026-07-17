@@ -82,7 +82,7 @@ func TestContextEndpointsAgainstEnvtest(t *testing.T) {
 
 	handler := server.New(server.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Kube:   kube.NewManager(writeTwoContextKubeconfig(t, cfg)),
+		Kube:   kube.NewManager([]string{writeTwoContextKubeconfig(t, cfg)}),
 		Dist:   os.DirFS(t.TempDir()),
 	})
 

@@ -87,7 +87,7 @@ func TestNodesEndpointAgainstEnvtest(t *testing.T) {
 	// kubeconfig file, exactly as production does.
 	handler := server.New(server.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Kube:   kube.NewManager(writeKubeconfig(t, cfg)),
+		Kube:   kube.NewManager([]string{writeKubeconfig(t, cfg)}),
 		Dist:   os.DirFS(t.TempDir()),
 	})
 
@@ -106,7 +106,7 @@ func TestNodesEndpointAgainstEnvtest(t *testing.T) {
 func TestNodesEndpointMissingKubeconfig(t *testing.T) {
 	handler := server.New(server.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Kube:   kube.NewManager(filepath.Join(t.TempDir(), "does-not-exist")),
+		Kube:   kube.NewManager([]string{filepath.Join(t.TempDir(), "does-not-exist")}),
 		Dist:   os.DirFS(t.TempDir()),
 	})
 

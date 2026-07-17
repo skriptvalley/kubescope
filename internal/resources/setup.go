@@ -1,23 +1,16 @@
 package resources
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
+
+	"github.com/skriptvalley/kubescope/internal/kube"
 )
 
 // docKubeconfigInDocker is the auth/kubeconfig-in-Docker doc surfaced by the
 // no-kubeconfig setup state; the same link classification.DocURL carries for
 // connectivity failures (ADR-0004).
 const docKubeconfigInDocker = "https://github.com/skriptvalley/kubescope/blob/main/docs/adr/0004-cluster-auth-and-kubeconfig-in-docker.md"
-
-// maxSetKubeconfigBodyBytes caps the set-kubeconfig request body; the payload is
-// a single small {"path":"..."} object.
-const maxSetKubeconfigBodyBytes = 64 << 10
 
 // SetupState is the first-run / connectivity posture the frontend reads to
 // decide between the app and a guided starter screen (FB-6, ADR-0007). It is
@@ -36,17 +29,15 @@ type SetupState struct {
 	Guidance string `json:"guidance,omitempty"`
 	// DocURL links to the doc covering this state's fix, when one applies.
 	DocURL string `json:"docURL,omitempty"`
-	// KubeconfigPath is the current kubeconfig source path.
-	KubeconfigPath string `json:"kubeconfigPath"`
+	// KubeconfigSources are the registered source paths in precedence order (the
+	// registry itself, not the expanded file list) — the full listing lives at
+	// GET /api/v1/kubeconfigs (ADR-0008).
+	KubeconfigSources []string `json:"kubeconfigSources"`
 	// ActiveContext is the resolved active context, when there is one.
 	ActiveContext string `json:"activeContext,omitempty"`
-	// CanSetKubeconfig reports whether the set-kubeconfig control is available
-	// (flag on and not read-only).
+	// CanSetKubeconfig reports whether the runtime source-registry controls are
+	// available (flag on and not read-only).
 	CanSetKubeconfig bool `json:"canSetKubeconfig"`
-}
-
-type setKubeconfigRequest struct {
-	Path string `json:"path"`
 }
 
 // SetupStateHandler serves GET /api/v1/setup: the first-run / connectivity
@@ -61,79 +52,32 @@ func SetupStateHandler(c Cluster, canSetKubeconfig bool, logger *slog.Logger, on
 	}
 }
 
-// SetKubeconfigHandler serves PUT /api/v1/kubeconfig: repoint the Manager at a
-// different kubeconfig file at runtime (ADR-0007). It is registered inside the
-// read-only guarded group, so read-only mode 403s it before this handler runs.
-// The flag gate returns 403 when disabled; a malformed/relative path is 400; a
-// candidate that fails validation is 422 with the previous source left intact;
-// success returns the refreshed setup state.
-func SetKubeconfigHandler(c Cluster, allowKubeconfigSet bool, logger *slog.Logger) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !allowKubeconfigSet {
-			writeErrorGuidance(w, logger, http.StatusForbidden, "kubeconfig_set_disabled",
-				"setting the kubeconfig source at runtime is disabled",
-				"Set KUBESCOPE_ALLOW_KUBECONFIG_SET=true to enable pointing Kubescope at another kubeconfig at runtime (ADR-0007).")
-			return
-		}
-
-		var req setKubeconfigRequest
-		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSetKubeconfigBodyBytes))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&req); err != nil {
-			writeError(w, logger, http.StatusBadRequest, "invalid_request",
-				`request body must be JSON with a "path" field`)
-			return
-		}
-		if dec.More() {
-			writeError(w, logger, http.StatusBadRequest, "invalid_request",
-				"request body must contain a single JSON object")
-			return
-		}
-		if req.Path == "" || !filepath.IsAbs(req.Path) {
-			writeError(w, logger, http.StatusBadRequest, "invalid_request",
-				"path must be a non-empty absolute path")
-			return
-		}
-
-		if err := c.SetKubeconfigPath(req.Path); err != nil {
-			writeErrorGuidance(w, logger, http.StatusUnprocessableEntity, "kubeconfig_invalid",
-				err.Error(),
-				"The previous kubeconfig source is unchanged. The path must be absolute, readable by the "+
-					"Kubescope process (in Docker: a mounted volume), and a valid kubeconfig with at least one context.")
-			return
-		}
-		// The path is a mount point / operator-supplied location, not file
-		// contents — safe to log; the kubeconfig itself is never logged.
-		logger.Info("kubeconfig source switched", "path", req.Path)
-		writeJSON(w, logger, http.StatusOK, resolveSetupState(c, allowKubeconfigSet, r, nil))
-	}
-}
-
-// resolveSetupState derives the setup posture from the current kubeconfig and
-// active-context reachability. It is shared by the setup endpoint and the
-// set-kubeconfig success path so both report identical shape.
+// resolveSetupState derives the setup posture from the current kubeconfig source
+// registry and active-context reachability. It is shared by the setup endpoint
+// and the source-registry mutation success paths so all report identical shape.
 func resolveSetupState(c Cluster, canSetKubeconfig bool, r *http.Request, onHealth HealthObserver) SetupState {
-	path := c.KubeconfigPath()
-	st := SetupState{KubeconfigPath: path, CanSetKubeconfig: canSetKubeconfig}
+	st := SetupState{KubeconfigSources: c.SourcePaths(), CanSetKubeconfig: canSetKubeconfig}
 
 	infos, err := c.Contexts()
 	if err != nil {
-		// The kubeconfig could not be read: distinguish "no file at all" from
-		// "file present but unparseable" so the starter screen can tailor its help.
-		if _, statErr := os.Stat(path); errors.Is(statErr, os.ErrNotExist) {
-			st.State = "no_kubeconfig"
+		// The registry resolved to no usable file (or the merge failed). Split
+		// "nothing to read" (every source missing or empty) from "present but
+		// unusable" using the per-source statuses so the starter screen can tailor
+		// its help. os.Stat on a single path no longer applies — a source may be a
+		// directory, and there may be several.
+		st.State = "no_kubeconfig"
+		st.Message = err.Error()
+		if allSourcesMissingOrEmpty(c.Sources()) {
 			st.Reason = "kubeconfig_missing"
-			st.Message = err.Error()
-			st.Guidance = fmt.Sprintf("No kubeconfig found at %s. Mount one into the container "+
-				"(docker run -v ~/.kube/config:/kubeconfig:ro …) or point KUBESCOPE_KUBECONFIG at a readable file.", path)
+			st.Guidance = "No usable kubeconfig found in the configured sources. Mount a kubeconfig file — " +
+				"or a directory of kubeconfig files — into the container (docker run -v ~/.kube:/kubeconfigs:ro …), " +
+				"then add it, or point KUBESCOPE_KUBECONFIG at a readable file or directory."
 			st.DocURL = docKubeconfigInDocker
 			return st
 		}
-		st.State = "no_kubeconfig"
 		st.Reason = "kubeconfig_invalid"
-		st.Message = err.Error()
-		st.Guidance = fmt.Sprintf("The file at %s is not a parseable kubeconfig — check it is valid YAML "+
-			"with clusters, users and contexts, or point Kubescope at a different file.", path)
+		st.Guidance = "A configured kubeconfig source is present but unusable — check the files are valid YAML " +
+			"with clusters, users and contexts, or point Kubescope at a different file or directory."
 		return st
 	}
 
@@ -171,4 +115,26 @@ func resolveSetupState(c Cluster, canSetKubeconfig bool, r *http.Request, onHeal
 	st.State = "ready"
 	st.ActiveContext = active
 	return st
+}
+
+// allSourcesMissingOrEmpty reports whether every configured source is missing or
+// empty (nothing to read) versus at least one being present-but-unusable
+// (unparseable). A directory source reads as "empty" even when it holds broken
+// files, so the per-file statuses are consulted too: an unparseable file inside
+// it means the user supplied something that failed to register — that is
+// kubeconfig_invalid territory, not "mount one". No sources configured at all
+// counts as "nothing to read". The status literals mirror the kube.SourceStatus
+// JSON contract (ADR-0008).
+func allSourcesMissingOrEmpty(sources []kube.SourceStatus) bool {
+	for _, s := range sources {
+		if s.Status != "missing" && s.Status != "empty" {
+			return false
+		}
+		for _, f := range s.Files {
+			if f.Status == "unparseable" {
+				return false
+			}
+		}
+	}
+	return true
 }

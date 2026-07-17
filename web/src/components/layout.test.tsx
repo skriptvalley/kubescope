@@ -43,7 +43,7 @@ function setup(state: SetupState["state"] | undefined) {
   const data: SetupState | undefined =
     state === undefined
       ? undefined
-      : { state, kubeconfigPath: "/kubeconfig", canSetKubeconfig: true };
+      : { state, kubeconfigSources: ["/kubeconfig"], canSetKubeconfig: true };
   setupMock.mockReturnValue({ data });
 }
 

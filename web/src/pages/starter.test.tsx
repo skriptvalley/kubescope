@@ -10,7 +10,9 @@ import { StarterPage } from "./starter";
 const listMock = vi.hoisted(() => vi.fn());
 const healthMock = vi.hoisted(() => vi.fn());
 const switchMock = vi.hoisted(() => vi.fn());
-const setKubeconfigMock = vi.hoisted(() => vi.fn());
+const kubeconfigsListMock = vi.hoisted(() => vi.fn());
+const kubeconfigsAddMock = vi.hoisted(() => vi.fn());
+const kubeconfigsRemoveMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/api")>();
@@ -18,13 +20,17 @@ vi.mock("@/lib/api", async (importOriginal) => {
     ...original,
     api: {
       contexts: { list: listMock, health: healthMock, switch: switchMock },
-      setup: { setKubeconfig: setKubeconfigMock },
+      kubeconfigs: {
+        list: kubeconfigsListMock,
+        add: kubeconfigsAddMock,
+        remove: kubeconfigsRemoveMock,
+      },
     },
   };
 });
 
 function makeState(overrides: Partial<SetupState> & Pick<SetupState, "state">): SetupState {
-  return { kubeconfigPath: "/kubeconfig", canSetKubeconfig: true, ...overrides };
+  return { kubeconfigSources: ["/kubeconfig"], canSetKubeconfig: true, ...overrides };
 }
 
 function renderStarter(state: SetupState) {
@@ -41,7 +47,9 @@ beforeEach(() => {
   listMock.mockReset().mockResolvedValue([]);
   healthMock.mockReset().mockResolvedValue([]);
   switchMock.mockReset().mockResolvedValue([]);
-  setKubeconfigMock.mockReset();
+  kubeconfigsListMock.mockReset().mockResolvedValue({ sources: [], canSetKubeconfig: true });
+  kubeconfigsAddMock.mockReset();
+  kubeconfigsRemoveMock.mockReset();
 });
 afterEach(() => connectivity.resetForTests());
 
@@ -97,41 +105,43 @@ describe("StarterPage", () => {
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
-  it("set-kubeconfig: a successful submit invalidates the setup query", async () => {
-    setKubeconfigMock.mockResolvedValue(makeState({ state: "ready" }));
+  it("add-source: a successful submit invalidates the setup and registry queries", async () => {
+    kubeconfigsAddMock.mockResolvedValue({ sources: [], canSetKubeconfig: true });
     const { queryClient } = renderStarter(makeState({ state: "no_kubeconfig" }));
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
-    fireEvent.change(screen.getByLabelText(/absolute kubeconfig path/i), {
+    fireEvent.change(await screen.findByLabelText(/absolute kubeconfig path/i), {
       target: { value: "/other/kubeconfig" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^use$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
 
-    await waitFor(() => expect(setKubeconfigMock).toHaveBeenCalledWith("/other/kubeconfig"));
-    await waitFor(() =>
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["setup"] }),
-    );
+    await waitFor(() => expect(kubeconfigsAddMock).toHaveBeenCalledWith("/other/kubeconfig"));
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["setup"] }));
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["kubeconfigs"] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["contexts"] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["discovery"] });
   });
 
-  it("set-kubeconfig: a failed submit surfaces the error message and guidance", async () => {
-    setKubeconfigMock.mockRejectedValue(
+  it("add-source: a failed submit surfaces the error message and guidance", async () => {
+    kubeconfigsAddMock.mockRejectedValue(
       new ApiError("path must be absolute", "invalid_request", 400, "use an absolute path"),
     );
     renderStarter(makeState({ state: "no_kubeconfig" }));
 
-    fireEvent.change(screen.getByLabelText(/absolute kubeconfig path/i), {
+    fireEvent.change(await screen.findByLabelText(/absolute kubeconfig path/i), {
       target: { value: "relative" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^use$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
 
     expect(await screen.findByText(/path must be absolute/i)).toBeInTheDocument();
     expect(screen.getByText(/use an absolute path/i)).toBeInTheDocument();
   });
 
-  it("hides the set-kubeconfig control when canSetKubeconfig is false", () => {
-    renderStarter(makeState({ state: "no_kubeconfig", canSetKubeconfig: false }));
-    expect(screen.queryByTestId("set-kubeconfig-form")).toBeNull();
-    expect(screen.getByTestId("set-kubeconfig-disabled")).toBeInTheDocument();
+  it("hides the add/remove controls when canSetKubeconfig is false", async () => {
+    kubeconfigsListMock.mockResolvedValue({ sources: [], canSetKubeconfig: false });
+    renderStarter(makeState({ state: "no_kubeconfig" }));
+    expect(await screen.findByTestId("kubeconfig-sources-disabled")).toBeInTheDocument();
+    expect(screen.queryByTestId("add-kubeconfig-source-form")).toBeNull();
   });
 });
 

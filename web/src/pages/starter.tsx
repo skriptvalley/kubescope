@@ -1,7 +1,8 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ExternalLink, FolderOpen, RefreshCw } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, ExternalLink, RefreshCw } from "lucide-react";
+import { type ReactNode } from "react";
 
+import { KubeconfigSources } from "@/components/kubeconfig-sources";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,15 +12,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { useContexts, useContextsHealth, useSwitchContext } from "@/hooks/use-contexts";
-import { api, ApiError, type SetupState } from "@/lib/api";
+import { type SetupState } from "@/lib/api";
 import { healthBadge } from "@/lib/context-health";
 import { cn } from "@/lib/utils";
 
 // The full-page starter shown by the Layout gate when the server has no usable
 // cluster yet (FB-6). It replaces the routed page while the header/sidebar stay
-// mounted so the context switcher and set-kubeconfig control remain usable.
+// mounted so the context switcher and kubeconfig-source registry remain usable.
 
 export function StarterPage({ state }: { state: SetupState }) {
   return (
@@ -87,7 +87,7 @@ function NoKubeconfig({ state }: { state: SetupState }) {
           </p>
           <DocLink href={state.docURL ?? ADR0004}>Read the Docker/auth guide</DocLink>
         </div>
-        <SetKubeconfigControl canSet={state.canSetKubeconfig} />
+        <KubeconfigSources />
       </CardContent>
     </Card>
   );
@@ -99,8 +99,12 @@ function NoContexts({ state }: { state: SetupState }) {
       <CardHeader>
         <CardTitle>Kubeconfig has no contexts</CardTitle>
         <CardDescription>
-          The file at <code className="font-mono">{state.kubeconfigPath}</code> was
-          found but defines no contexts, so there is no cluster to connect to.
+          The registered kubeconfig source
+          {state.kubeconfigSources.length === 1 ? "" : "s"} (
+          <code className="font-mono">
+            {state.kubeconfigSources.join(", ") || "none"}
+          </code>
+          ) defined no contexts, so there is no cluster to connect to.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
@@ -119,7 +123,7 @@ function NoContexts({ state }: { state: SetupState }) {
             </li>
           </ul>
         </div>
-        <SetKubeconfigControl canSet={state.canSetKubeconfig} />
+        <KubeconfigSources />
       </CardContent>
     </Card>
   );
@@ -137,7 +141,7 @@ function NoActiveContext({ state }: { state: SetupState }) {
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
         <ContextChooser />
-        <SetKubeconfigControl canSet={state.canSetKubeconfig} />
+        <KubeconfigSources />
       </CardContent>
     </Card>
   );
@@ -175,7 +179,7 @@ function ActiveUnreachable({ state }: { state: SetupState }) {
           <p className="font-medium">Switch to another context</p>
           <ContextChooser />
         </div>
-        <SetKubeconfigControl canSet={state.canSetKubeconfig} />
+        <KubeconfigSources />
       </CardContent>
     </Card>
   );
@@ -229,73 +233,5 @@ function ContextChooser() {
       })}
       </ul>
     </div>
-  );
-}
-
-/** Absolute-path input that repoints the server at another kubeconfig at runtime
- *  (ADR-0007). Hidden behind a flag: when disabled, only a hint is shown. */
-function SetKubeconfigControl({ canSet }: { canSet: boolean }) {
-  const queryClient = useQueryClient();
-  const [path, setPath] = useState("");
-  const mutation = useMutation({
-    mutationFn: (p: string) => api.setup.setKubeconfig(p),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["setup"] });
-      void queryClient.invalidateQueries({ queryKey: ["contexts"] });
-      void queryClient.invalidateQueries({ queryKey: ["contexts", "health"] });
-    },
-  });
-
-  if (!canSet) {
-    return (
-      <p className="text-xs text-muted-foreground" data-testid="set-kubeconfig-disabled">
-        Enable pointing Kubescope at another kubeconfig with{" "}
-        <code className="font-mono">KUBESCOPE_ALLOW_KUBECONFIG_SET=true</code>{" "}
-        (read-only mode keeps this off) — or mount/point a kubeconfig and restart.
-      </p>
-    );
-  }
-
-  const apiError = mutation.error instanceof ApiError ? mutation.error : undefined;
-  const trimmed = path.trim();
-
-  return (
-    <form
-      className="space-y-2 border-t pt-4"
-      data-testid="set-kubeconfig-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (trimmed) mutation.mutate(trimmed);
-      }}
-    >
-      <label className="flex items-center gap-2 text-sm font-medium">
-        <FolderOpen className="h-4 w-4" />
-        Use a different kubeconfig
-      </label>
-      <div className="flex gap-2">
-        <Input
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          placeholder="/kubeconfig"
-          aria-label="Absolute kubeconfig path"
-          spellCheck={false}
-        />
-        <Button type="submit" size="sm" disabled={!trimmed || mutation.isPending}>
-          {mutation.isPending ? "Loading…" : "Use"}
-        </Button>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Absolute path readable by the Kubescope process (in Docker, a mounted
-        volume such as <code className="font-mono">/kubeconfig</code>).
-      </p>
-      {apiError && (
-        <div role="alert" className="space-y-1 text-xs text-destructive">
-          <p className="break-words">
-            {apiError.message} ({apiError.code})
-          </p>
-          {apiError.guidance && <p className="opacity-90">{apiError.guidance}</p>}
-        </div>
-      )}
-    </form>
   );
 }

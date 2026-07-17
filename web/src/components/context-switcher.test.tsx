@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, type ContextInfo } from "@/lib/api";
+import { connectivity } from "@/lib/connectivity";
 import { healthBadge } from "@/lib/context-health";
 
 import { ContextSwitcher } from "./context-switcher";
@@ -10,14 +11,32 @@ import { ContextSwitcher } from "./context-switcher";
 const listMock = vi.hoisted(() => vi.fn());
 const healthMock = vi.hoisted(() => vi.fn());
 const switchMock = vi.hoisted(() => vi.fn());
+const setupMock = vi.hoisted(() => vi.fn());
+const kubeconfigsListMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...original,
-    api: { contexts: { list: listMock, health: healthMock, switch: switchMock } },
+    api: {
+      contexts: { list: listMock, health: healthMock, switch: switchMock },
+      setup: { state: setupMock },
+      kubeconfigs: { list: kubeconfigsListMock },
+    },
   };
 });
+
+// Default: a ready server with the source registry locked. Individual cases
+// override the setup state (FB-9 muted branch) or canSetKubeconfig (manage entry).
+beforeEach(() => {
+  setupMock.mockReset().mockResolvedValue({
+    state: "ready",
+    kubeconfigSources: ["/kubeconfig"],
+    canSetKubeconfig: false,
+  });
+  kubeconfigsListMock.mockReset().mockResolvedValue({ sources: [], canSetKubeconfig: true });
+});
+afterEach(() => connectivity.resetForTests());
 
 const contexts: ContextInfo[] = [
   { name: "prod", cluster: "c-prod", namespace: "default", active: true },
@@ -132,5 +151,52 @@ describe("ContextSwitcher", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/switch failed/i);
     expect(alert).toHaveTextContent(/unknown_context/);
+  });
+
+  it("shows a neutral muted label (not a red error) when contexts fail before the server is ready", async () => {
+    listMock.mockRejectedValue(new ApiError("cannot load kubeconfig", "kubeconfig_unavailable", 503));
+    healthMock.mockResolvedValue([]);
+    setupMock.mockResolvedValue({ state: "no_kubeconfig", kubeconfigSources: [], canSetKubeconfig: true });
+    renderSwitcher();
+
+    expect(await screen.findByText("no cluster")).toBeInTheDocument();
+    expect(screen.queryByText("kubeconfig error")).toBeNull();
+  });
+
+  it("shows the red kubeconfig error when contexts fail while the server is ready", async () => {
+    listMock.mockRejectedValue(new ApiError("cannot load kubeconfig", "kubeconfig_unavailable", 503));
+    healthMock.mockResolvedValue([]);
+    setupMock.mockResolvedValue({ state: "ready", kubeconfigSources: ["/kubeconfig"], canSetKubeconfig: false });
+    renderSwitcher();
+
+    expect(await screen.findByText("kubeconfig error")).toBeInTheDocument();
+    expect(screen.queryByText("no cluster")).toBeNull();
+  });
+
+  it("offers a Manage kubeconfig sources entry when the registry is editable", async () => {
+    listMock.mockResolvedValue(contexts);
+    healthMock.mockResolvedValue([]);
+    setupMock.mockResolvedValue({ state: "ready", kubeconfigSources: ["/kubeconfig"], canSetKubeconfig: true });
+    renderSwitcher();
+
+    const trigger = await screen.findByRole("button", { name: /switch context/i });
+    await waitFor(() => expect(trigger).toBeEnabled());
+    fireEvent.click(trigger);
+
+    expect(await screen.findByText("Manage kubeconfig sources")).toBeInTheDocument();
+  });
+
+  it("hides the Manage kubeconfig sources entry when the registry is locked", async () => {
+    listMock.mockResolvedValue(contexts);
+    healthMock.mockResolvedValue([]);
+    setupMock.mockResolvedValue({ state: "ready", kubeconfigSources: ["/kubeconfig"], canSetKubeconfig: false });
+    renderSwitcher();
+
+    const trigger = await screen.findByRole("button", { name: /switch context/i });
+    await waitFor(() => expect(trigger).toBeEnabled());
+    fireEvent.click(trigger);
+
+    expect(await screen.findByText("dev")).toBeInTheDocument();
+    expect(screen.queryByText("Manage kubeconfig sources")).toBeNull();
   });
 });

@@ -1,9 +1,10 @@
-// Package kube loads the mounted kubeconfig, enumerates its contexts, switches
-// the active context, and hands out per-context Kubernetes clients built lazily
-// and cached. The kubeconfig is treated strictly read-only — Kubescope never
-// writes the mounted file; the active context is in-memory server state only.
-// Auth gotchas (embedded vs file-path creds, exec plugins, local clusters) are
-// documented in ADR-0004.
+// Package kube loads an ordered registry of kubeconfig sources (files and
+// directories), merges them with kubectl precedence, enumerates the resulting
+// contexts, switches the active context, and hands out per-context Kubernetes
+// clients built lazily and cached. The kubeconfig files are treated strictly
+// read-only — Kubescope never writes them; the registry and the active context
+// are in-memory server state only (ADR-0008). Auth gotchas (embedded vs
+// file-path creds, exec plugins, local clusters) are documented in ADR-0004.
 package kube
 
 import (
@@ -11,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -34,27 +36,30 @@ const defaultProbeTimeout = 5 * time.Second
 // headroom than a single-call health probe.
 const discoveryTimeout = 15 * time.Second
 
-// Manager parses the kubeconfig on demand, tracks the active context in memory,
-// and caches a successfully-built rest.Config + clientset per context. Failures
-// are not cached, so a kubeconfig that appears (or is fixed) after startup is
-// picked up on the next request without a restart.
+// Manager expands and merges the kubeconfig source registry on demand, tracks
+// the active context in memory, and caches a successfully-built rest.Config +
+// clientset per context. Failures are not cached, and directory sources are
+// re-scanned every request, so a kubeconfig that appears (or is fixed, or is
+// dropped into a mounted directory) after startup is picked up on the next
+// request without a restart (ADR-0008).
 type Manager struct {
-	kubeconfigPath string
-	probeTimeout   time.Duration
+	sources      []registrySource
+	probeTimeout time.Duration
 
 	mu       sync.RWMutex
-	active   string                   // in-memory override; "" = kubeconfig current-context
+	active   string                   // in-memory override; "" = merged current-context
 	clients  map[string]*cachedClient // per-context cache of successful builds
 	onSwitch func(current string)     // notified after a context switch (nil = no observer)
-	// sourceGen counts kubeconfig-source swaps (ADR-0007). Context names are
+	// sourceGen counts registry mutations (ADR-0007/0008). Context names are
 	// not globally unique across kubeconfig files, so every context-keyed cache
-	// (discovery, stream informers) folds this into its key — a swap then makes
-	// same-named contexts from the old file unreachable via cache keys instead
-	// of silently serving the old cluster's data.
+	// (discovery, stream informers) folds this into its key — a mutation then
+	// makes same-named contexts from the old source set unreachable via cache
+	// keys instead of silently serving the old cluster's data. Passive
+	// directory-scan changes deliberately do NOT bump it (ADR-0008).
 	sourceGen int64
-	// onSourceChange is notified after a successful SetKubeconfigPath; the
-	// wiring tears down live sessions (exec, port-forwards) whose credentials
-	// came from the previous source (nil = no observer).
+	// onSourceChange is notified after a successful registry mutation (AddSource
+	// / RemoveSource); the wiring tears down live sessions (exec, port-forwards)
+	// whose credentials came from the previous source set (nil = no observer).
 	onSourceChange func()
 }
 
@@ -69,13 +74,18 @@ type cachedClient struct {
 	discoveryClient discovery.DiscoveryInterface
 }
 
-// NewManager returns a Manager reading the kubeconfig at path. The file is not
+// NewManager returns a Manager whose registry is seeded from paths (the env
+// baseline, in precedence order; each a file or a directory). No source is
 // touched until the first context or client is requested.
-func NewManager(path string) *Manager {
+func NewManager(paths []string) *Manager {
+	sources := make([]registrySource, len(paths))
+	for i, p := range paths {
+		sources[i] = registrySource{path: p, origin: originEnv}
+	}
 	return &Manager{
-		kubeconfigPath: path,
-		probeTimeout:   defaultProbeTimeout,
-		clients:        make(map[string]*cachedClient),
+		sources:      sources,
+		probeTimeout: defaultProbeTimeout,
+		clients:      make(map[string]*cachedClient),
 	}
 }
 
@@ -258,9 +268,12 @@ func (m *Manager) clientsFor(name string) (*cachedClient, error) {
 	if cached, ok := m.clients[name]; ok { // another goroutine may have built it
 		return cached, nil
 	}
-	// Read the source path under the held lock (buildRestConfig takes it as an
-	// argument) so a concurrent SetKubeconfigPath can't deadlock on a re-lock.
-	restCfg, err := m.buildRestConfig(m.kubeconfigPath, name)
+	// Snapshot the registry under the held lock and expand it here (the file I/O
+	// runs under the lock, exactly as the pre-registry single-file load did) so a
+	// concurrent AddSource/RemoveSource can't deadlock on a re-lock — expandSources
+	// and buildRestConfig take the snapshot as arguments, never re-locking.
+	_, files := expandSources(m.sourcesLocked())
+	restCfg, err := m.buildRestConfig(files, name)
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +330,10 @@ func (m *Manager) ProbeAll(ctx context.Context) ([]ContextHealth, error) {
 func (m *Manager) probe(ctx context.Context, raw clientcmdapi.Config, name string) ContextHealth {
 	hints := m.hintsFor(raw, name)
 
-	restCfg, err := m.buildRestConfig(m.KubeconfigPath(), name)
+	// Re-expand the registry per probe (the per-request scan property, ADR-0008)
+	// and pass the snapshot's usable files to buildRestConfig.
+	_, files := expandSources(m.sourcesSnapshot())
+	restCfg, err := m.buildRestConfig(files, name)
 	if err != nil {
 		h := classify(err, hints)
 		h.Name = name
@@ -378,36 +394,35 @@ func (m *Manager) evictStaleClient(name, freshHost string) {
 	}
 }
 
-// rawConfig loads the kubeconfig from the current source path. A missing or
-// malformed file returns a wrapped error rather than falling back to other
-// kubeconfigs.
+// rawConfig expands the current registry and loads the merged kubeconfig with
+// kubectl precedence. Zero usable files is a typed *NoUsableSourceError carrying
+// the per-source statuses (so setup state can explain why); a merge/parse error
+// is wrapped. Error messages carry paths and parse positions only — never file
+// contents.
 func (m *Manager) rawConfig() (clientcmdapi.Config, error) {
-	return m.rawConfigAt(m.KubeconfigPath())
-}
-
-// rawConfigAt loads and validates a kubeconfig at an explicit path. It never
-// touches Manager state, so it doubles as the validate-before-swap step of
-// SetKubeconfigPath. Error messages carry the path and the clientcmd parse
-// error only — never file contents.
-func (m *Manager) rawConfigAt(path string) (clientcmdapi.Config, error) {
-	loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: path}
+	statuses, files := expandSources(m.sourcesSnapshot())
+	if len(files) == 0 {
+		return clientcmdapi.Config{}, &NoUsableSourceError{Statuses: statuses}
+	}
+	loadingRules := &clientcmd.ClientConfigLoadingRules{Precedence: files}
 	cfg, err := loadingRules.Load()
 	if err != nil {
-		return clientcmdapi.Config{}, fmt.Errorf("loading kubeconfig %q: %w", path, err)
+		return clientcmdapi.Config{}, fmt.Errorf("loading kubeconfig sources: %w", err)
 	}
 	if cfg == nil {
-		return clientcmdapi.Config{}, fmt.Errorf("loading kubeconfig %q: empty config", path)
+		return clientcmdapi.Config{}, fmt.Errorf("loading kubeconfig sources: empty config")
 	}
 	return *cfg, nil
 }
 
 // buildRestConfig builds a rest.Config for the named context from the given
-// kubeconfig path. Embedded certs/tokens work as-is; exec-plugin and
-// file-path-cert gotchas surface at call time and are handled by the health
-// probe (ADR-0004). The path is passed in (not read from m) so a caller holding
-// m.mu can reuse the value it already read without re-locking.
-func (m *Manager) buildRestConfig(path, name string) (*rest.Config, error) {
-	loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: path}
+// merged file list (clientcmd Precedence — first occurrence of a name wins).
+// Embedded certs/tokens work as-is; exec-plugin and file-path-cert gotchas
+// surface at call time and are handled by the health probe (ADR-0004). The file
+// list is passed in (not read from m) so a caller holding m.mu can reuse the
+// snapshot it already expanded without re-locking.
+func (m *Manager) buildRestConfig(files []string, name string) (*rest.Config, error) {
+	loadingRules := &clientcmd.ClientConfigLoadingRules{Precedence: files}
 	overrides := &clientcmd.ConfigOverrides{CurrentContext: name}
 	cc := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, overrides)
 	restCfg, err := cc.ClientConfig()
@@ -417,38 +432,131 @@ func (m *Manager) buildRestConfig(path, name string) (*rest.Config, error) {
 	return restCfg, nil
 }
 
-// KubeconfigPath returns the current kubeconfig source path.
-func (m *Manager) KubeconfigPath() string {
+// sourcesSnapshot returns a copy of the source registry under the read lock, for
+// callers that do not already hold m.mu.
+func (m *Manager) sourcesSnapshot() []registrySource {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.kubeconfigPath
+	return m.sourcesLocked()
 }
 
-// SetKubeconfigPath repoints the Manager at a different kubeconfig file at
-// runtime (ADR-0007). The candidate is validated BEFORE any swap — it must be a
-// non-empty absolute path that parses and defines at least one context — so a
-// working source is never lost to a typo. On success the source path, the
-// in-memory active-context override, and the per-context client cache are reset
-// in a single critical section, so setup state and /contexts reflect the new
-// file immediately. File contents are never logged or echoed in errors.
-func (m *Manager) SetKubeconfigPath(path string) error {
+// sourcesLocked returns a copy of the source registry. The caller MUST already
+// hold m.mu (read or write); it exists so a critical section can hand a stable
+// snapshot to expandSources without releasing and re-taking the lock.
+func (m *Manager) sourcesLocked() []registrySource {
+	return append([]registrySource(nil), m.sources...)
+}
+
+// Sources expands the current registry and returns the per-source statuses for
+// the API. It never errors — an unreadable or empty registry is reported
+// per-source, not as a failure.
+func (m *Manager) Sources() []SourceStatus {
+	statuses, _ := expandSources(m.sourcesSnapshot())
+	return statuses
+}
+
+// SourcePaths returns the registered source paths in precedence order (the
+// registry itself, not the expanded file list).
+func (m *Manager) SourcePaths() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	paths := make([]string, len(m.sources))
+	for i, s := range m.sources {
+		paths[i] = s.path
+	}
+	return paths
+}
+
+// AddSource registers a new runtime kubeconfig source (ADR-0008). The candidate
+// is validated BEFORE any commit — non-empty, absolute, visible, and either a
+// parseable file with ≥1 context or a readable directory (an empty directory is
+// valid) — so a working registry is never disturbed by a bad path. A duplicate
+// path is a typed *DuplicateSourceError; an invisible path a *SourceInvisibleError
+// (the handler names the mounted-directory workflow). On success the source is
+// appended with origin "runtime" via the shared commit path, which fires the
+// source observer exactly once. File contents are never logged or echoed.
+func (m *Manager) AddSource(path string) error {
 	if path == "" {
-		return errors.New("kubeconfig path must not be empty")
+		return errors.New("kubeconfig source path must not be empty")
 	}
 	if !filepath.IsAbs(path) {
-		return fmt.Errorf("kubeconfig path %q must be absolute", path)
-	}
-	raw, err := m.rawConfigAt(path)
-	if err != nil {
-		return err
-	}
-	if len(raw.Contexts) == 0 {
-		return fmt.Errorf("kubeconfig %q defines no contexts", path)
+		return fmt.Errorf("kubeconfig source path %q must be absolute", path)
 	}
 
+	// Cheap duplicate pre-check so an already-registered path reports 409 even
+	// when its file has since gone missing (409 beats 422 in error precedence).
+	m.mu.RLock()
+	dup := m.hasSourceLocked(path)
+	m.mu.RUnlock()
+	if dup {
+		return &DuplicateSourceError{Path: path}
+	}
+
+	if err := validateSource(path); err != nil {
+		return err
+	}
+
+	// Re-check and append against the CURRENT registry inside the commit lock —
+	// building "next" from a pre-validation snapshot would let two concurrent
+	// mutations silently drop one (a lost update the wholesale-swap model of
+	// ADR-0007 could not have).
+	return m.commit(func() error {
+		if m.hasSourceLocked(path) {
+			return &DuplicateSourceError{Path: path}
+		}
+		m.sources = append(m.sourcesLocked(), registrySource{path: path, origin: originRuntime})
+		return nil
+	})
+}
+
+// hasSourceLocked reports whether path is already registered. Caller holds m.mu.
+func (m *Manager) hasSourceLocked(path string) bool {
+	for _, s := range m.sources {
+		if s.path == path {
+			return true
+		}
+	}
+	return false
+}
+
+// RemoveSource drops the source whose id (sourceID of its path) matches. Any
+// registered source — env baseline or runtime — is removable, and the registry
+// may become empty (a subsequent request then reports no usable source). An
+// unknown id is a typed *UnknownSourceError. On success the shared commit path
+// fires the source observer exactly once. The active-context override is kept;
+// resolveActive self-heals if its context is no longer resolvable.
+func (m *Manager) RemoveSource(id string) error {
+	return m.commit(func() error {
+		next := make([]registrySource, 0, len(m.sources))
+		found := false
+		for _, s := range m.sources {
+			if sourceID(s.path) == id {
+				found = true
+				continue
+			}
+			next = append(next, s)
+		}
+		if !found {
+			return &UnknownSourceError{ID: id}
+		}
+		m.sources = next
+		return nil
+	})
+}
+
+// commit runs mutate over the CURRENT registry in one critical section and, when
+// it succeeds, resets the client cache (context names may now resolve to
+// different files), bumps the source generation (context-keyed caches key away
+// from the old set), and captures the source observer to fire OUTSIDE the lock.
+// A mutate error changes nothing and fires nothing. The active-context override
+// is deliberately NOT reset — resolveActive falls back if its context vanished.
+// mutate must not do I/O; validation runs before commit.
+func (m *Manager) commit(mutate func() error) error {
 	m.mu.Lock()
-	m.kubeconfigPath = path
-	m.active = ""
+	if err := mutate(); err != nil {
+		m.mu.Unlock()
+		return err
+	}
 	m.clients = make(map[string]*cachedClient)
 	m.sourceGen++
 	obs := m.onSourceChange
@@ -459,21 +567,44 @@ func (m *Manager) SetKubeconfigPath(path string) error {
 	return nil
 }
 
-// SourceGeneration identifies the current kubeconfig source: it increments on
-// every successful SetKubeconfigPath. Context-keyed caches include it in their
-// keys so a source swap never serves data cached from the previous file's
-// same-named context.
+// validateSource is the AddSource precondition check. It does I/O (stat, and a
+// parse for file sources) and never touches Manager state, so it runs outside
+// the commit critical section. An empty directory is valid.
+func validateSource(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return &SourceInvisibleError{Path: path, err: err}
+	}
+	if info.IsDir() {
+		if _, err := os.ReadDir(path); err != nil {
+			return &SourceInvisibleError{Path: path, err: err}
+		}
+		return nil
+	}
+	cfg, err := clientcmd.LoadFromFile(path)
+	if err != nil {
+		return fmt.Errorf("kubeconfig %q is not parseable: %w", path, err)
+	}
+	if cfg == nil || len(cfg.Contexts) == 0 {
+		return fmt.Errorf("kubeconfig %q defines no contexts", path)
+	}
+	return nil
+}
+
+// SourceGeneration identifies the current source set: it increments on every
+// successful registry mutation (AddSource/RemoveSource). Context-keyed caches
+// include it in their keys so a mutation never serves data cached from the
+// previous set's same-named context.
 func (m *Manager) SourceGeneration() int64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.sourceGen
 }
 
-// SetSourceObserver registers a callback invoked after every successful
-// SetKubeconfigPath. It lets the streaming layer tear down live sessions
-// (exec terminals, port-forwards) built on the previous source's credentials —
-// the source-swap analog of the context-switch observer. Set once at startup;
-// a nil fn clears it.
+// SetSourceObserver registers a callback invoked after every successful registry
+// mutation. It lets the streaming layer tear down live sessions (exec terminals,
+// port-forwards) built on the previous source set's credentials — the analog of
+// the context-switch observer. Set once at startup; a nil fn clears it.
 func (m *Manager) SetSourceObserver(fn func()) {
 	m.mu.Lock()
 	m.onSourceChange = fn

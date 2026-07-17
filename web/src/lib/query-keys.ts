@@ -19,6 +19,9 @@ export const queryKeys = {
   serviceDetail: (namespace: string, name: string) =>
     ["service-detail", namespace, name] as const,
   search: (query: string) => ["search", query] as const,
+  // Registry-scoped (not cluster-scoped): the kubeconfig source registry is
+  // shared across contexts, so it is NOT dropped on a context switch.
+  kubeconfigs: () => ["kubeconfigs"] as const,
 };
 
 /** Query-key prefixes whose data is scoped to a single cluster; dropped on

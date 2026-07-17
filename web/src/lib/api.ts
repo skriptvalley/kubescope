@@ -55,8 +55,52 @@ export interface SetupState {
   message?: string;
   guidance?: string;
   docURL?: string;
-  kubeconfigPath: string;
+  /** Registered kubeconfig source paths in precedence order (not expanded files)
+   *  — the source registry that feeds the merged kubeconfig (FB-8). */
+  kubeconfigSources: string[];
   activeContext?: string;
+  canSetKubeconfig: boolean;
+}
+
+// --- Kubeconfig source registry (FB-8) ---------------------------------------
+// A registry of kubeconfig sources (files or directories) merged in precedence
+// order. Each source expands to zero or more kubeconfig files; contexts win
+// first-in-precedence and shadowed duplicates are surfaced.
+
+/** One kubeconfig file inside a directory source (or the file source itself). */
+export interface KubeconfigSourceFile {
+  path: string;
+  status: "ok" | "unparseable" | "too_large" | "hidden";
+  /** Classified detail when not ok (e.g. the parse error); omitted when ok. */
+  message?: string;
+  /** Context names this file contributes (its winning definitions). */
+  contexts?: string[];
+  /** Context names defined here but won by an earlier file. */
+  shadowed?: string[];
+}
+
+/** One registered kubeconfig source (a file or a directory of kubeconfigs). */
+export interface KubeconfigSource {
+  /** First 12 hex of sha256(path). Stable, URL-safe; used for DELETE. */
+  id: string;
+  path: string;
+  kind: "file" | "dir";
+  origin: "env" | "runtime";
+  status: "ok" | "missing" | "unparseable" | "empty";
+  /** Classified detail when not ok; omitted when ok. */
+  message?: string;
+  /** Directory sources only, lexicographic; omitted for file sources. */
+  files?: KubeconfigSourceFile[];
+  /** Context names whose winning definition comes from this source. */
+  contexts?: string[];
+  /** Context names defined here but won by an earlier source. */
+  shadowed?: string[];
+}
+
+export interface KubeconfigSourceList {
+  sources: KubeconfigSource[];
+  /** Whether the runtime add/remove controls are permitted (server folds in the
+   *  KUBESCOPE_ALLOW_KUBECONFIG_SET flag and read-only mode). */
   canSetKubeconfig: boolean;
 }
 
@@ -487,14 +531,23 @@ export const api = {
   /** First-run / connectivity posture (FB-6). Unguarded; always 200. */
   setup: {
     state: async (): Promise<SetupState> => request<SetupState>("/api/v1/setup"),
-    /** Repoint the server at another kubeconfig at runtime (ADR-0007). Guarded
-     *  by KUBESCOPE_ALLOW_KUBECONFIG_SET and read-only mode server-side. Returns
-     *  the fresh setup state on success. */
-    setKubeconfig: async (path: string): Promise<SetupState> =>
-      request<SetupState>("/api/v1/kubeconfig", {
-        method: "PUT",
+  },
+  /** Kubeconfig source registry (FB-8). Listing is unguarded (always 200);
+   *  add/remove are guarded by KUBESCOPE_ALLOW_KUBECONFIG_SET and read-only mode
+   *  server-side, reflected in the listing's canSetKubeconfig. Every mutation
+   *  returns the fresh listing. */
+  kubeconfigs: {
+    list: async (): Promise<KubeconfigSourceList> =>
+      request<KubeconfigSourceList>("/api/v1/kubeconfigs"),
+    add: async (path: string): Promise<KubeconfigSourceList> =>
+      request<KubeconfigSourceList>("/api/v1/kubeconfigs", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path }),
+      }),
+    remove: async (id: string): Promise<KubeconfigSourceList> =>
+      request<KubeconfigSourceList>(`/api/v1/kubeconfigs/${encodeURIComponent(id)}`, {
+        method: "DELETE",
       }),
   },
   nodes: {

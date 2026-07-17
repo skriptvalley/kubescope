@@ -59,7 +59,7 @@ func TestMutationsAgainstEnvtest(t *testing.T) {
 
 	handler := server.New(server.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Kube:   kube.NewManager(writeKubeconfig(t, cfg)),
+		Kube:   kube.NewManager([]string{writeKubeconfig(t, cfg)}),
 		Dist:   os.DirFS(t.TempDir()),
 	})
 	do := func(method, path string, body []byte) *httptest.ResponseRecorder {
@@ -263,7 +263,7 @@ func TestMutationsAgainstEnvtest(t *testing.T) {
 	t.Run("read-only mode rejects mutations with a 403", func(t *testing.T) {
 		ro := server.New(server.Options{
 			Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-			Kube:     kube.NewManager(writeKubeconfig(t, cfg)),
+			Kube:     kube.NewManager([]string{writeKubeconfig(t, cfg)}),
 			ReadOnly: true,
 			Dist:     os.DirFS(t.TempDir()),
 		})
