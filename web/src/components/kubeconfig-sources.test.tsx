@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, type KubeconfigSourceList } from "@/lib/api";
+import { clusterScopedKeyPrefixes } from "@/lib/query-keys";
 
 import { KubeconfigSources } from "./kubeconfig-sources";
 
@@ -79,9 +80,14 @@ describe("KubeconfigSources", () => {
     expect(screen.getByText(/shadowed by an earlier source: kind-a/)).toBeInTheDocument();
   });
 
-  it("adds a source and invalidates the setup, registry, contexts and discovery queries", async () => {
+  it("adds a source, refetches every mounted view and drops inactive cluster caches", async () => {
+    // A source mutation can repoint the ACTIVE context at a different cluster,
+    // so it must mirror the context-switch pattern (FB-2): global invalidate
+    // first (refetches mounted views in place), then remove only the inactive
+    // cluster-scoped caches.
     const { queryClient } = renderSources();
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const removeSpy = vi.spyOn(queryClient, "removeQueries");
 
     fireEvent.change(await screen.findByLabelText(/absolute kubeconfig path/i), {
       target: { value: "/extra/config" },
@@ -89,11 +95,14 @@ describe("KubeconfigSources", () => {
     fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
 
     await waitFor(() => expect(addMock).toHaveBeenCalledWith("/extra/config"));
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["setup"] }));
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["kubeconfigs"] });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["contexts"] });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["contexts", "health"] });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["discovery"] });
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith());
+    const removeOrder = invalidateSpy.mock.invocationCallOrder[0];
+    for (const key of clusterScopedKeyPrefixes) {
+      expect(removeSpy).toHaveBeenCalledWith({ queryKey: key, type: "inactive" });
+    }
+    // Invalidate must run before any removal: a removed query has no observer
+    // to refetch, which would strand the current page on stale data.
+    expect(removeOrder).toBeLessThan(removeSpy.mock.invocationCallOrder[0]);
   });
 
   it("surfaces the guidance on a rejected add", async () => {
@@ -123,16 +132,13 @@ describe("KubeconfigSources", () => {
     await waitFor(() => expect(removeMock).toHaveBeenCalledWith("dir123"));
   });
 
-  it("rescans by invalidating the registry scope", async () => {
+  it("rescans by refetching every mounted view", async () => {
     const { queryClient } = renderSources();
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
     fireEvent.click(await screen.findByRole("button", { name: /rescan/i }));
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["kubeconfigs"] });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["setup"] });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["contexts"] });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["discovery"] });
+    expect(invalidateSpy).toHaveBeenCalledWith();
   });
 
   it("hides the add/remove controls when the registry is locked", async () => {

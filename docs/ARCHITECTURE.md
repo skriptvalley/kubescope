@@ -109,10 +109,10 @@ docker run --rm -p 8080:8080 -v ~/.kube/config:/kubeconfig:ro ghcr.io/skriptvall
 |---|---|---|
 | `KUBESCOPE_LISTEN_ADDR` | `127.0.0.1:8080` | Full listen address (`host:port`) |
 | `KUBESCOPE_PORT` | `8080` | Port shorthand; overrides the port part of `LISTEN_ADDR` |
-| `KUBESCOPE_KUBECONFIG` | `/kubeconfig`, falling back to `$KUBECONFIG`, then `~/.kube/config` | Path to kubeconfig |
+| `KUBESCOPE_KUBECONFIG` | `/kubeconfig`, falling back to `$KUBECONFIG`, then `~/.kube/config` | Kubeconfig source list: colon-separated files and/or directories, kubectl merge precedence ([adr/0008](adr/0008-kubeconfig-source-registry.md)) |
 | `KUBESCOPE_READ_ONLY` | `false` | Reject all mutating operations when `true` |
 | `KUBESCOPE_AUTH_MODE` | `none` | `none` \| `basic` \| `oidc` (basic/oidc land in Sprint 8) |
-| `KUBESCOPE_ALLOW_KUBECONFIG_SET` | `false` | Enable the runtime set-kubeconfig endpoint (`PUT /api/v1/kubeconfig`, path-only; [adr/0007](adr/0007-runtime-kubeconfig-source.md)) |
+| `KUBESCOPE_ALLOW_KUBECONFIG_SET` | `false` | Enable the runtime source-registry mutations (`POST /api/v1/kubeconfigs`, `DELETE /api/v1/kubeconfigs/{id}`; [adr/0008](adr/0008-kubeconfig-source-registry.md)) |
 
 ## v2 seams
 

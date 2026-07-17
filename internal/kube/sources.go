@@ -195,12 +195,18 @@ func expandDir(st *SourceStatus, dir string, srcIdx int, candidates *[]candidate
 			st.Files = append(st.Files, fs)
 			continue
 		}
-		info, err := entry.Info()
+		// os.Stat (not entry.Info) so a symlink is judged by its TARGET: the
+		// lstat size of a link is the link path's length, which would slip an
+		// oversized target past the cap and let LoadFromFile read it unbounded.
+		info, err := os.Stat(full)
 		if err != nil {
 			fs.Status = fileStatusUnparseable
-			fs.Message = err.Error()
+			fs.Message = err.Error() // dangling symlink or vanished file
 			st.Files = append(st.Files, fs)
 			continue
+		}
+		if !info.Mode().IsRegular() {
+			continue // symlinked dirs, devices, fifos: not kubeconfig candidates, not listed
 		}
 		if info.Size() > maxKubeconfigFileBytes {
 			fs.Status = fileStatusTooLarge

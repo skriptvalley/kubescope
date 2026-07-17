@@ -101,6 +101,44 @@ func TestDirectoryExpansionSkipRules(t *testing.T) {
 	assert.Equal(t, "kind-a", infos[0].Name, "a broken file in the directory never fails the usable one")
 }
 
+// TestDirectorySymlinksJudgedByTarget pins the symlink handling in a directory
+// source: the size cap must apply to the TARGET (a link's lstat size is just the
+// link path's length, which would let an oversized target be read unbounded);
+// a symlink to a directory is skipped like a subdirectory; a dangling symlink is
+// reported per-file, never a global failure; a symlink to a valid kubeconfig
+// works.
+func TestDirectorySymlinksJudgedByTarget(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+
+	big := filepath.Join(outside, "big-target.yaml")
+	require.NoError(t, os.WriteFile(big, bytes.Repeat([]byte("x"), maxKubeconfigFileBytes+1), 0o600))
+	require.NoError(t, os.Symlink(big, filepath.Join(dir, "a-biglink.yaml")))
+
+	require.NoError(t, os.Symlink(outside, filepath.Join(dir, "b-dirlink")))
+	require.NoError(t, os.Symlink(filepath.Join(outside, "gone.yaml"), filepath.Join(dir, "c-dangling.yaml")))
+
+	target := writeConfigAt(t, outside, "good-target.yaml", singleContextConfig(t, "kind-linked"))
+	require.NoError(t, os.Symlink(target, filepath.Join(dir, "d-goodlink.yaml")))
+
+	m := newManager(dir)
+	src := m.Sources()[0]
+
+	got := map[string]string{}
+	for _, f := range src.Files {
+		got[filepath.Base(f.Path)] = f.Status
+	}
+	assert.Equal(t, fileStatusTooLarge, got["a-biglink.yaml"], "size cap applies to the symlink target")
+	assert.NotContains(t, got, "b-dirlink", "a symlink to a directory is skipped like a subdirectory")
+	assert.Equal(t, fileStatusUnparseable, got["c-dangling.yaml"], "a dangling symlink is a per-file status")
+	assert.Equal(t, fileStatusOK, got["d-goodlink.yaml"], "a symlink to a valid kubeconfig is usable")
+
+	infos, err := m.Contexts()
+	require.NoError(t, err)
+	require.Len(t, infos, 1)
+	assert.Equal(t, "kind-linked", infos[0].Name)
+}
+
 // TestDirectoryIntraDirShadowing pins that shadowing is computed across the full
 // expanded file list, including two files within the same directory defining the
 // same context name — the lexicographically-earlier file wins.

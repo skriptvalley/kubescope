@@ -1,18 +1,20 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
-import { queryKeys } from "@/lib/query-keys";
+import { clusterScopedKeyPrefixes, queryKeys } from "@/lib/query-keys";
 
-/** Invalidate everything a kubeconfig-source change (or a rescan) can affect: the
- *  source listing itself, the server's setup posture, the context list + health,
- *  and discovery. Discovery is included so the sidebar nav re-derives when a new
- *  source repoints the active cluster (the stale-nav gap the old control had). */
+/** A source mutation (or a rescan picking up a changed dir) can repoint the
+ *  ACTIVE context at a different cluster server-side, so it needs the same
+ *  treatment as a context switch (FB-2): refetch every mounted view in place
+ *  first — a removed query has no observer to refetch — then drop the unmounted
+ *  cluster-scoped caches so later navigation refetches instead of flashing the
+ *  previous cluster's data. Anything narrower leaves e.g. the Overview showing
+ *  the old cluster indefinitely (no refetchInterval on those views). */
 function invalidateKubeconfigScope(queryClient: QueryClient): void {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.kubeconfigs() });
-  void queryClient.invalidateQueries({ queryKey: ["setup"] });
-  void queryClient.invalidateQueries({ queryKey: ["contexts"] });
-  void queryClient.invalidateQueries({ queryKey: ["contexts", "health"] });
-  void queryClient.invalidateQueries({ queryKey: ["discovery"] });
+  void queryClient.invalidateQueries();
+  for (const key of clusterScopedKeyPrefixes) {
+    queryClient.removeQueries({ queryKey: key, type: "inactive" });
+  }
 }
 
 /** The kubeconfig source registry (FB-8). Registry-scoped, so it is not dropped

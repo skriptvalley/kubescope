@@ -105,7 +105,7 @@ describe("StarterPage", () => {
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
-  it("add-source: a successful submit invalidates the setup and registry queries", async () => {
+  it("add-source: a successful submit refetches every mounted view (cluster may change)", async () => {
     kubeconfigsAddMock.mockResolvedValue({ sources: [], canSetKubeconfig: true });
     const { queryClient } = renderStarter(makeState({ state: "no_kubeconfig" }));
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
@@ -116,10 +116,9 @@ describe("StarterPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
 
     await waitFor(() => expect(kubeconfigsAddMock).toHaveBeenCalledWith("/other/kubeconfig"));
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["setup"] }));
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["kubeconfigs"] });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["contexts"] });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["discovery"] });
+    // A source add can repoint the active context, so it does a full invalidate
+    // (refetch every mounted view) like a context switch — see use-kubeconfigs.
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith());
   });
 
   it("add-source: a failed submit surfaces the error message and guidance", async () => {
