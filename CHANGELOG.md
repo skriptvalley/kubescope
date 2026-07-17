@@ -4,12 +4,13 @@ All notable changes to Kubescope are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] — 2026-07-16
+## [0.1.0] — 2026-07-17
 
 First tagged release: a self-hostable, single-container Kubernetes dashboard that
 mounts your kubeconfig, switches contexts, and browses and operates on every
 resource type — with live updates, logs, exec, guarded mutations, and a
-safe-by-default security posture. Summary of what landed across sprints 0–8.
+safe-by-default security posture. Summary of what landed across sprints 0–8 plus
+the post-sprint connectivity, kubeconfig-source, and onboarding hardening rounds.
 
 ### Added
 
@@ -53,6 +54,25 @@ safe-by-default security posture. Summary of what landed across sprints 0–8.
 - **CI/CD (Sprint 8).** GitHub Actions PR pipeline (Go + frontend lint, unit
   tests, embedded-SPA binary build) and a tag-triggered workflow publishing the
   multi-arch image to `ghcr.io/skriptvalley/kubescope`.
+- **Cluster-connectivity resilience & onboarding (FB-6, FB-1).** No-kubeconfig,
+  no-context, and unreachable states render a guided setup starter instead of a
+  raw error; apiserver/transport failures are classified into an actionable
+  taxonomy (`kube.ClassifyError`) surfaced end to end (read paths included); a
+  cluster torn down mid-view emits a typed SSE unreachable status with bounded
+  backoff and auto-resume; the kubeconfig source can be set at runtime from the
+  UI, gated by `KUBESCOPE_ALLOW_KUBECONFIG_SET` (ADR-0007, superseded by 0008).
+- **Kubeconfig source registry (FB-8).** `KUBESCOPE_KUBECONFIG` (and the
+  `$KUBECONFIG` fallback) accepts an OS-path list of kubeconfig files *and
+  directories*, merged with kubectl precedence (clientcmd); the default
+  `/kubeconfig` probe accepts a directory, so `-v ~/.kube:/kubeconfig:ro` works
+  with zero env vars. A registry API (`GET`/`POST /api/v1/kubeconfigs`,
+  `DELETE /api/v1/kubeconfigs/{id}`) and UI (starter + context-switcher dialog)
+  add and remove sources at runtime as an in-memory overlay (restart reverts),
+  gated by `KUBESCOPE_ALLOW_KUBECONFIG_SET`; dropping a file into a mounted
+  directory registers a new cluster without a restart (ADR-0008).
+- **Onboarding polish (FB-9).** With no usable cluster connection, the sidebar
+  and context switcher show muted placeholders keyed off setup state instead of
+  leaking raw red errors; genuine mid-session errors stay red.
 
 ### Security
 
