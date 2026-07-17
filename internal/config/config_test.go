@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,26 +32,26 @@ func TestLoad(t *testing.T) {
 			name: "all defaults",
 			env:  map[string]string{},
 			want: Config{
-				ListenAddr:     "127.0.0.1:8080",
-				KubeconfigPath: "/home/u/.kube/config",
-				ReadOnly:       false,
-				AuthMode:       "none",
+				ListenAddr:        "127.0.0.1:8080",
+				KubeconfigSources: []string{"/home/u/.kube/config"},
+				ReadOnly:          false,
+				AuthMode:          "none",
 			},
 		},
 		{
 			name: "listen addr override",
 			env:  map[string]string{EnvListenAddr: "0.0.0.0:9090"},
-			want: Config{ListenAddr: "0.0.0.0:9090", KubeconfigPath: "/home/u/.kube/config", AuthMode: "none"},
+			want: Config{ListenAddr: "0.0.0.0:9090", KubeconfigSources: []string{"/home/u/.kube/config"}, AuthMode: "none"},
 		},
 		{
 			name: "port overrides port part of default listen addr",
 			env:  map[string]string{EnvPort: "3000"},
-			want: Config{ListenAddr: "127.0.0.1:3000", KubeconfigPath: "/home/u/.kube/config", AuthMode: "none"},
+			want: Config{ListenAddr: "127.0.0.1:3000", KubeconfigSources: []string{"/home/u/.kube/config"}, AuthMode: "none"},
 		},
 		{
 			name: "port overrides port part of explicit listen addr",
 			env:  map[string]string{EnvListenAddr: "10.0.0.1:8080", EnvPort: "9999"},
-			want: Config{ListenAddr: "10.0.0.1:9999", KubeconfigPath: "/home/u/.kube/config", AuthMode: "none"},
+			want: Config{ListenAddr: "10.0.0.1:9999", KubeconfigSources: []string{"/home/u/.kube/config"}, AuthMode: "none"},
 		},
 		{
 			name:    "invalid listen addr",
@@ -76,23 +77,52 @@ func TestLoad(t *testing.T) {
 			name:   "explicit kubeconfig wins over everything",
 			env:    map[string]string{EnvKubeconfig: "/custom/cfg", "KUBECONFIG": "/env/cfg"},
 			exists: map[string]bool{"/kubeconfig": true},
-			want:   Config{ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/custom/cfg", AuthMode: "none"},
+			want:   Config{ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/custom/cfg"}, AuthMode: "none"},
 		},
 		{
 			name:   "mounted /kubeconfig wins over KUBECONFIG env",
 			env:    map[string]string{"KUBECONFIG": "/env/cfg"},
 			exists: map[string]bool{"/kubeconfig": true},
-			want:   Config{ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/kubeconfig", AuthMode: "none"},
+			want:   Config{ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/kubeconfig"}, AuthMode: "none"},
+		},
+		{
+			// The default mount point is accepted as a directory too (ADR-0008);
+			// the existence seam abstracts file-vs-dir, so this asserts the probe
+			// still resolves it to the single source.
+			name:   "mounted /kubeconfig as a directory is accepted",
+			env:    map[string]string{},
+			exists: map[string]bool{"/kubeconfig": true},
+			want:   Config{ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/kubeconfig"}, AuthMode: "none"},
 		},
 		{
 			name: "KUBECONFIG env wins over home fallback",
 			env:  map[string]string{"KUBECONFIG": "/env/cfg"},
-			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/env/cfg", AuthMode: "none"},
+			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/env/cfg"}, AuthMode: "none"},
+		},
+		{
+			name: "explicit kubeconfig list splits on the path separator, in order",
+			env:  map[string]string{EnvKubeconfig: "/a/kubeconfig:/b/dir:/c/cfg"},
+			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/a/kubeconfig", "/b/dir", "/c/cfg"}, AuthMode: "none"},
+		},
+		{
+			name: "explicit kubeconfig list drops empty segments",
+			env:  map[string]string{EnvKubeconfig: ":/a::/b:"},
+			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/a", "/b"}, AuthMode: "none"},
+		},
+		{
+			name:    "explicit kubeconfig of only separators is rejected",
+			env:     map[string]string{EnvKubeconfig: ":::"},
+			wantErr: "KUBESCOPE_KUBECONFIG",
+		},
+		{
+			name: "KUBECONFIG env list splits on the path separator",
+			env:  map[string]string{"KUBECONFIG": "/env/a:/env/b"},
+			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/env/a", "/env/b"}, AuthMode: "none"},
 		},
 		{
 			name: "empty KUBECONFIG env falls through to home",
 			env:  map[string]string{"KUBECONFIG": ""},
-			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/home/u/.kube/config", AuthMode: "none"},
+			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/home/u/.kube/config"}, AuthMode: "none"},
 		},
 		{
 			name:    "empty explicit kubeconfig rejected",
@@ -102,7 +132,7 @@ func TestLoad(t *testing.T) {
 		{
 			name: "read only true",
 			env:  map[string]string{EnvReadOnly: "true"},
-			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/home/u/.kube/config", ReadOnly: true, AuthMode: "none"},
+			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/home/u/.kube/config"}, ReadOnly: true, AuthMode: "none"},
 		},
 		{
 			name:    "read only invalid",
@@ -117,7 +147,7 @@ func TestLoad(t *testing.T) {
 				EnvAuthBasicPassword: "s3cret",
 			},
 			want: Config{
-				ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/home/u/.kube/config",
+				ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/home/u/.kube/config"},
 				AuthMode: "basic", BasicAuthUsername: "admin", BasicAuthPassword: "s3cret",
 			},
 		},
@@ -150,13 +180,13 @@ func TestLoad(t *testing.T) {
 				EnvAuthBasicUsername: "admin",
 				EnvAuthBasicPassword: "s3cret",
 			},
-			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/home/u/.kube/config", AuthMode: "none"},
+			want: Config{ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/home/u/.kube/config"}, AuthMode: "none"},
 		},
 		{
 			name: "allow kubeconfig set defaults to false",
 			env:  map[string]string{},
 			want: Config{
-				ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/home/u/.kube/config",
+				ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/home/u/.kube/config"},
 				AuthMode: "none", AllowKubeconfigSet: false,
 			},
 		},
@@ -164,7 +194,7 @@ func TestLoad(t *testing.T) {
 			name: "allow kubeconfig set true",
 			env:  map[string]string{EnvAllowKubeconfigSet: "true"},
 			want: Config{
-				ListenAddr: "127.0.0.1:8080", KubeconfigPath: "/home/u/.kube/config",
+				ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/home/u/.kube/config"},
 				AuthMode: "none", AllowKubeconfigSet: true,
 			},
 		},
@@ -192,6 +222,19 @@ func TestLoad(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// TestStatExistsAcceptsFileAndDirectory pins the ADR-0008 change to the default
+// existence probe: the container mount point resolves whether it is a file or a
+// directory, and a truly absent path still reports missing.
+func TestStatExistsAcceptsFileAndDirectory(t *testing.T) {
+	dir := t.TempDir()
+	file := dir + "/kubeconfig"
+	require.NoError(t, os.WriteFile(file, []byte("x"), 0o600))
+
+	assert.True(t, statExists(file), "a file at the mount point exists")
+	assert.True(t, statExists(dir), "a directory at the mount point exists")
+	assert.False(t, statExists(dir+"/absent"), "an absent path does not exist")
 }
 
 func TestLoadHomeDirError(t *testing.T) {

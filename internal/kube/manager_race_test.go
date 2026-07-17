@@ -32,7 +32,7 @@ func TestManagerConcurrentAccess(t *testing.T) {
 		Contexts:       contexts,
 		CurrentContext: names[0],
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 
 	const workers = 24
 	var wg sync.WaitGroup
@@ -63,10 +63,15 @@ func TestManagerConcurrentAccess(t *testing.T) {
 	require.NotNil(t, cs)
 }
 
-// TestManagerConcurrentKubeconfigSwap races SetKubeconfigPath against readers
-// (Contexts / ClientsetFor) to prove the mutex-guarded source path and client
-// cache reset are concurrency-safe. Run with `go test -race`.
-func TestManagerConcurrentKubeconfigSwap(t *testing.T) {
+// TestManagerConcurrentRegistryMutation races AddSource/RemoveSource against
+// readers (Contexts / ClientsetFor / Sources / SourcePaths) to prove the
+// mutex-guarded registry swap and client-cache reset are concurrency-safe. Run
+// with `go test -race`. The env-baseline source is kept for the whole run so the
+// registry always resolves, while a second source is added and removed under
+// contention; assertions stay loose because concurrent add/remove of the same
+// path is inherently racy on the final membership — the invariant under test is
+// the absence of data races and a always-resolvable registry.
+func TestManagerConcurrentRegistryMutation(t *testing.T) {
 	ca := testCACert(t)
 	newFile := func(ctxName string) string {
 		return writeConfig(t, clientcmdapi.Config{
@@ -76,9 +81,10 @@ func TestManagerConcurrentKubeconfigSwap(t *testing.T) {
 			CurrentContext: ctxName,
 		})
 	}
-	pathA := newFile("alpha")
-	pathB := newFile("beta")
-	m := NewManager(pathA)
+	pathA := newFile("alpha") // stable env baseline, never removed
+	pathB := newFile("beta")  // toggled in and out under contention
+	idB := sourceID(pathB)
+	m := newManager(pathA)
 
 	const workers = 16
 	var wg sync.WaitGroup
@@ -87,24 +93,27 @@ func TestManagerConcurrentKubeconfigSwap(t *testing.T) {
 		go func(w int) {
 			defer wg.Done()
 			for i := 0; i < 40; i++ {
-				switch (w + i) % 4 {
+				switch (w + i) % 5 {
 				case 0:
-					_ = m.SetKubeconfigPath(pathA)
+					_ = m.AddSource(pathB)
 				case 1:
-					_ = m.SetKubeconfigPath(pathB)
+					_ = m.RemoveSource(idB)
 				case 2:
 					_, _ = m.Contexts()
 				case 3:
-					_ = m.KubeconfigPath()
+					_ = m.SourcePaths()
 					_, _ = m.ClientsetFor("alpha")
+				case 4:
+					_ = m.Sources()
 				}
 			}
 		}(w)
 	}
 	wg.Wait()
 
-	// The source ends at one of the two valid files and still serves contexts.
-	require.Contains(t, []string{pathA, pathB}, m.KubeconfigPath())
+	// The baseline survives regardless of how the race resolved, so the registry
+	// still serves contexts.
+	require.Contains(t, m.SourcePaths(), pathA)
 	_, err := m.Contexts()
 	require.NoError(t, err)
 }

@@ -37,15 +37,19 @@ type fakeCluster struct {
 	discoveryErr error
 	// FB-6 additions. execCmd/loopback are the classification hints
 	// ClassifyActiveError feeds the real kube.ClassifyError, so handler tests
-	// exercise the actual taxonomy. kubeconfigPath/probeHealth/setErr drive the
-	// setup-state and set-kubeconfig handlers; setPath captures the last set.
-	execCmd        string
-	loopback       bool
-	kubeconfigPath string
-	probeHealth    kube.ContextHealth
-	setErr         error
-	setPath        string
-	sourceGen      int64
+	// exercise the actual taxonomy. probeHealth drives the setup-state handler.
+	// FB-8: sources/sourcePaths back the registry read surface; addErr/removeErr
+	// drive the mutation handlers, and addedPath/removedID capture the last call.
+	execCmd     string
+	loopback    bool
+	probeHealth kube.ContextHealth
+	sourceGen   int64
+	sources     []kube.SourceStatus
+	sourcePaths []string
+	addErr      error
+	addedPath   string
+	removeErr   error
+	removedID   string
 }
 
 func (f *fakeCluster) Clientset() (kubernetes.Interface, error) { return f.clientset, f.clientsetErr }
@@ -60,14 +64,19 @@ func (f *fakeCluster) DiscoveryFor(string) (discovery.DiscoveryInterface, error)
 func (f *fakeCluster) ProbeAll(context.Context) ([]kube.ContextHealth, error) {
 	return f.health, f.healthErr
 }
-func (f *fakeCluster) KubeconfigPath() string { return f.kubeconfigPath }
-func (f *fakeCluster) SetKubeconfigPath(path string) error {
-	f.setPath = path
-	if f.setErr != nil {
-		return f.setErr
+func (f *fakeCluster) Sources() []kube.SourceStatus { return f.sources }
+func (f *fakeCluster) SourcePaths() []string        { return f.sourcePaths }
+func (f *fakeCluster) AddSource(path string) error {
+	f.addedPath = path
+	if f.addErr != nil {
+		return f.addErr
 	}
-	f.kubeconfigPath = path
+	f.sourcePaths = append(f.sourcePaths, path)
 	return nil
+}
+func (f *fakeCluster) RemoveSource(id string) error {
+	f.removedID = id
+	return f.removeErr
 }
 func (f *fakeCluster) ProbeContext(context.Context, string) kube.ContextHealth { return f.probeHealth }
 func (f *fakeCluster) SourceGeneration() int64                                 { return f.sourceGen }

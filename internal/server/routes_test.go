@@ -22,7 +22,8 @@ var mutatingMethods = map[string]bool{
 // guardedRoutes is the full set of state-mutating routes that MUST be rejected in
 // read-only mode (ADR-0005). Keyed "METHOD PATTERN".
 var guardedRoutes = map[string]bool{
-	"PUT /api/v1/kubeconfig":                                       true,
+	"POST /api/v1/kubeconfigs":                                     true,
+	"DELETE /api/v1/kubeconfigs/{id}":                              true,
 	"PUT /api/v1/resources/{group}/{version}/{resource}/{name}":    true,
 	"DELETE /api/v1/resources/{group}/{version}/{resource}/{name}": true,
 	"POST /api/v1/workloads/{resource}/{namespace}/{name}/scale":   true,

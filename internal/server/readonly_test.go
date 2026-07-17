@@ -28,9 +28,12 @@ var mutatingRoutes = []struct {
 	path   string
 	body   string
 }{
-	// Repointing the kubeconfig source (ADR-0007) is a server-state mutation, so
-	// read-only mode 403s it before the AllowKubeconfigSet flag is even consulted.
-	{"set-kubeconfig", http.MethodPut, "/api/v1/kubeconfig", `{"path":"/tmp/kubeconfig"}`},
+	// Registering/dropping a kubeconfig source (ADR-0008) is a server-state
+	// mutation, so read-only mode 403s both before the AllowKubeconfigSet flag is
+	// even consulted. In writable mode the add fails validation (422, invisible
+	// path) and the delete 404s (unknown id) — both non-403, proving pass-through.
+	{"add-kubeconfig-source", http.MethodPost, "/api/v1/kubeconfigs", `{"path":"/nonexistent-e2e"}`},
+	{"remove-kubeconfig-source", http.MethodDelete, "/api/v1/kubeconfigs/deadbeef0000", ""},
 	{"apply", http.MethodPut, "/api/v1/resources/apps/v1/deployments/nginx?namespace=default", `{"yaml":"kind: Deployment"}`},
 	{"delete", http.MethodDelete, "/api/v1/resources/apps/v1/deployments/nginx?namespace=default", ""},
 	{"scale", http.MethodPost, "/api/v1/workloads/deployments/default/nginx/scale", `{"replicas":3}`},
@@ -151,10 +154,11 @@ func TestSetupEndpointUnguardedAndReflectsPosture(t *testing.T) {
 	}
 }
 
-// TestSetKubeconfigFlagOffIs403 verifies the runtime set-kubeconfig endpoint
-// 403s on its own flag when reached in writable mode with the flag disabled —
-// the read-only guard passes it through, and the handler's own gate stops it.
-func TestSetKubeconfigFlagOffIs403(t *testing.T) {
+// TestKubeconfigSourceFlagOffIs403 verifies both runtime source-registry
+// mutations 403 on their own flag when reached in writable mode with the flag
+// disabled — the read-only guard passes them through, and each handler's own
+// gate stops it (ADR-0008).
+func TestKubeconfigSourceFlagOffIs403(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	provider := &fakeProvider{clientset: fake.NewClientset()}
 	srv := New(Options{
@@ -164,14 +168,24 @@ func TestSetKubeconfigFlagOffIs403(t *testing.T) {
 		AllowKubeconfigSet: false,
 		Dist:               fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("spa")}},
 	})
-	rec := doMutation(t, srv, http.MethodPut, "/api/v1/kubeconfig", `{"path":"/new/kubeconfig"}`)
 
-	assert.Equal(t, http.StatusForbidden, rec.Code)
-	var env struct {
-		Error struct{ Code string } `json:"error"`
+	cases := []struct {
+		name, method, path, body string
+	}{
+		{"add", http.MethodPost, "/api/v1/kubeconfigs", `{"path":"/new/kubeconfig"}`},
+		{"remove", http.MethodDelete, "/api/v1/kubeconfigs/deadbeef0000", ""},
 	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
-	assert.Equal(t, "kubeconfig_set_disabled", env.Error.Code)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doMutation(t, srv, tc.method, tc.path, tc.body)
+			assert.Equal(t, http.StatusForbidden, rec.Code)
+			var env struct {
+				Error struct{ Code string } `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &env))
+			assert.Equal(t, "kubeconfig_set_disabled", env.Error.Code)
+		})
+	}
 }
 
 // TestContextSwitchNotGatedByReadOnly guards the classification boundary: the

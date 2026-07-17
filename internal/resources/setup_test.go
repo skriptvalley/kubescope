@@ -5,9 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,27 +21,24 @@ func decodeSetupState(t *testing.T, body []byte) SetupState {
 }
 
 func TestSetupStateHandler(t *testing.T) {
-	// invalidPath is a real file so os.Stat succeeds, letting the resolver
-	// distinguish "present but unparseable" from "missing".
-	invalidPath := filepath.Join(t.TempDir(), "kubeconfig")
-	require.NoError(t, os.WriteFile(invalidPath, []byte("not valid yaml: ["), 0o600))
-
 	tests := []struct {
-		name          string
-		cluster       *fakeCluster
-		canSet        bool
-		wantState     string
-		wantReason    string
-		wantActive    string
-		wantDocURL    bool
-		wantGuidance  bool
-		wantCanSetSet bool
+		name         string
+		cluster      *fakeCluster
+		canSet       bool
+		wantState    string
+		wantReason   string
+		wantActive   string
+		wantDocURL   bool
+		wantGuidance bool
 	}{
 		{
-			name: "no kubeconfig when file is missing",
+			// Every source missing/empty → "nothing to read" (kubeconfig_missing),
+			// derived from the per-source statuses rather than an os.Stat.
+			name: "no kubeconfig when every source is missing",
 			cluster: &fakeCluster{
-				kubeconfigPath: filepath.Join(t.TempDir(), "does-not-exist"),
-				contextsErr:    errors.New("loading kubeconfig: no such file or directory"),
+				sourcePaths: []string{"/kubeconfig"},
+				sources:     []kube.SourceStatus{{Path: "/kubeconfig", Status: "missing"}},
+				contextsErr: errors.New("no usable kubeconfig source among: /kubeconfig (missing)"),
 			},
 			canSet:       true,
 			wantState:    "no_kubeconfig",
@@ -53,10 +47,13 @@ func TestSetupStateHandler(t *testing.T) {
 			wantGuidance: true,
 		},
 		{
-			name: "no kubeconfig when file is unparseable",
+			// A source present but unparseable → "present but unusable"
+			// (kubeconfig_invalid), no Docker doc link.
+			name: "no kubeconfig when a source is present but unparseable",
 			cluster: &fakeCluster{
-				kubeconfigPath: invalidPath,
-				contextsErr:    errors.New("loading kubeconfig: parse error"),
+				sourcePaths: []string{"/kubeconfig"},
+				sources:     []kube.SourceStatus{{Path: "/kubeconfig", Status: "unparseable"}},
+				contextsErr: errors.New("no usable kubeconfig source among: /kubeconfig (unparseable)"),
 			},
 			canSet:       true,
 			wantState:    "no_kubeconfig",
@@ -65,10 +62,32 @@ func TestSetupStateHandler(t *testing.T) {
 			wantGuidance: true,
 		},
 		{
-			name: "no contexts when kubeconfig is empty",
+			// A directory source reads "empty" when none of its files are usable,
+			// but a broken file inside it means the user supplied something that
+			// failed to register — the reason must be kubeconfig_invalid, not
+			// "mount one".
+			name: "no kubeconfig when a directory holds only an unparseable file",
 			cluster: &fakeCluster{
-				kubeconfigPath: "/kubeconfig",
-				contexts:       []kube.ContextInfo{},
+				sourcePaths: []string{"/kubeconfigs"},
+				sources: []kube.SourceStatus{{
+					Path:   "/kubeconfigs",
+					Kind:   "dir",
+					Status: "empty",
+					Files:  []kube.SourceFileStatus{{Path: "/kubeconfigs/broken.yaml", Status: "unparseable"}},
+				}},
+				contextsErr: errors.New("no usable kubeconfig source among: /kubeconfigs (empty)"),
+			},
+			canSet:       true,
+			wantState:    "no_kubeconfig",
+			wantReason:   "kubeconfig_invalid",
+			wantDocURL:   false,
+			wantGuidance: true,
+		},
+		{
+			name: "no contexts when the merged config is empty",
+			cluster: &fakeCluster{
+				sourcePaths: []string{"/kubeconfig"},
+				contexts:    []kube.ContextInfo{},
 			},
 			canSet:       true,
 			wantState:    "no_contexts",
@@ -78,9 +97,9 @@ func TestSetupStateHandler(t *testing.T) {
 		{
 			name: "no active context when current-context is unset",
 			cluster: &fakeCluster{
-				kubeconfigPath: "/kubeconfig",
-				contexts:       []kube.ContextInfo{{Name: "a"}},
-				activeErr:      errors.New("kubeconfig has no current-context set"),
+				sourcePaths: []string{"/kubeconfig"},
+				contexts:    []kube.ContextInfo{{Name: "a"}},
+				activeErr:   errors.New("kubeconfig has no current-context set"),
 			},
 			canSet:       true,
 			wantState:    "no_active_context",
@@ -90,9 +109,9 @@ func TestSetupStateHandler(t *testing.T) {
 		{
 			name: "active unreachable surfaces health fields",
 			cluster: &fakeCluster{
-				kubeconfigPath: "/kubeconfig",
-				contexts:       []kube.ContextInfo{{Name: "prod", Active: true}},
-				active:         "prod",
+				sourcePaths: []string{"/kubeconfig"},
+				contexts:    []kube.ContextInfo{{Name: "prod", Active: true}},
+				active:      "prod",
 				probeHealth: kube.ContextHealth{
 					Name:     "prod",
 					Reason:   "connection_refused",
@@ -111,10 +130,10 @@ func TestSetupStateHandler(t *testing.T) {
 		{
 			name: "ready when the active context is reachable",
 			cluster: &fakeCluster{
-				kubeconfigPath: "/kubeconfig",
-				contexts:       []kube.ContextInfo{{Name: "prod", Active: true}},
-				active:         "prod",
-				probeHealth:    kube.ContextHealth{Name: "prod", Reachable: true, AuthOK: true, ServerVersion: "v1.33.0"},
+				sourcePaths: []string{"/kubeconfig"},
+				contexts:    []kube.ContextInfo{{Name: "prod", Active: true}},
+				active:      "prod",
+				probeHealth: kube.ContextHealth{Name: "prod", Reachable: true, AuthOK: true, ServerVersion: "v1.33.0"},
 			},
 			canSet:     false,
 			wantState:  "ready",
@@ -135,7 +154,7 @@ func TestSetupStateHandler(t *testing.T) {
 			assert.Equal(t, tt.wantState, st.State)
 			assert.Equal(t, tt.wantReason, st.Reason)
 			assert.Equal(t, tt.wantActive, st.ActiveContext)
-			assert.Equal(t, tt.cluster.kubeconfigPath, st.KubeconfigPath)
+			assert.Equal(t, tt.cluster.sourcePaths, st.KubeconfigSources)
 			assert.Equal(t, tt.canSet, st.CanSetKubeconfig)
 			if tt.wantDocURL {
 				assert.NotEmpty(t, st.DocURL)
@@ -149,90 +168,15 @@ func TestSetupStateHandler(t *testing.T) {
 	}
 }
 
-func TestSetKubeconfigHandler(t *testing.T) {
-	doPut := func(t *testing.T, cluster Cluster, allow bool, body string) *httptest.ResponseRecorder {
-		t.Helper()
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPut, "/api/v1/kubeconfig", strings.NewReader(body))
-		SetKubeconfigHandler(cluster, allow, discardLogger())(rec, req)
-		return rec
-	}
-
-	t.Run("flag off is 403 kubeconfig_set_disabled", func(t *testing.T) {
-		cluster := &fakeCluster{kubeconfigPath: "/original"}
-		rec := doPut(t, cluster, false, `{"path":"/new/kubeconfig"}`)
-
-		assert.Equal(t, http.StatusForbidden, rec.Code)
-		assert.Equal(t, "kubeconfig_set_disabled", errorCode(t, rec.Body.Bytes()))
-		assert.Empty(t, cluster.setPath, "the source must not be touched when the flag is off")
-	})
-
-	t.Run("malformed body is 400 invalid_request", func(t *testing.T) {
-		cluster := &fakeCluster{kubeconfigPath: "/original"}
-		rec := doPut(t, cluster, true, `not json`)
-
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
-		assert.Equal(t, "invalid_request", errorCode(t, rec.Body.Bytes()))
-		assert.Empty(t, cluster.setPath)
-	})
-
-	t.Run("relative path is 400 invalid_request", func(t *testing.T) {
-		cluster := &fakeCluster{kubeconfigPath: "/original"}
-		rec := doPut(t, cluster, true, `{"path":"relative/kubeconfig"}`)
-
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
-		assert.Equal(t, "invalid_request", errorCode(t, rec.Body.Bytes()))
-		assert.Empty(t, cluster.setPath)
-	})
-
-	t.Run("invalid candidate is 422 and leaves the source intact", func(t *testing.T) {
-		cluster := &fakeCluster{
-			kubeconfigPath: "/original",
-			setErr:         errors.New(`kubeconfig "/new/kubeconfig" defines no contexts`),
-		}
-		rec := doPut(t, cluster, true, `{"path":"/new/kubeconfig"}`)
-
-		assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
-		assert.Equal(t, "kubeconfig_invalid", errorCode(t, rec.Body.Bytes()))
-		assert.Equal(t, "/new/kubeconfig", cluster.setPath, "the swap was attempted")
-		assert.Equal(t, "/original", cluster.kubeconfigPath, "the previous source is unchanged")
-	})
-
-	t.Run("success returns 200 with the refreshed setup state", func(t *testing.T) {
-		cluster := &fakeCluster{
-			kubeconfigPath: "/original",
-			contexts:       []kube.ContextInfo{{Name: "prod", Active: true}},
-			active:         "prod",
-			probeHealth:    kube.ContextHealth{Name: "prod", Reachable: true, AuthOK: true},
-		}
-		rec := doPut(t, cluster, true, `{"path":"/new/kubeconfig"}`)
-
-		require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
-		assert.Equal(t, "/new/kubeconfig", cluster.kubeconfigPath, "the source was swapped")
-		st := decodeSetupState(t, rec.Body.Bytes())
-		assert.Equal(t, "ready", st.State)
-		assert.Equal(t, "prod", st.ActiveContext)
-		assert.Equal(t, "/new/kubeconfig", st.KubeconfigPath)
-	})
-
-	t.Run("unknown fields are rejected", func(t *testing.T) {
-		cluster := &fakeCluster{kubeconfigPath: "/original"}
-		rec := doPut(t, cluster, true, `{"path":"/new/kubeconfig","extra":true}`)
-
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
-		assert.Equal(t, "invalid_request", errorCode(t, rec.Body.Bytes()))
-	})
-}
-
 // TestSetupStateNotifiesHealthObserver pins the probe→stream signal: resolving
 // the setup state feeds the active context's probe result to the observer, so
 // the watch layer learns about outages the watch itself cannot see.
 func TestSetupStateNotifiesHealthObserver(t *testing.T) {
 	cluster := &fakeCluster{
-		kubeconfigPath: "/kubeconfig",
-		contexts:       []kube.ContextInfo{{Name: "prod", Active: true}},
-		active:         "prod",
-		probeHealth:    kube.ContextHealth{Name: "prod", Reason: "connection_refused", Error: "refused"},
+		sourcePaths: []string{"/kubeconfig"},
+		contexts:    []kube.ContextInfo{{Name: "prod", Active: true}},
+		active:      "prod",
+		probeHealth: kube.ContextHealth{Name: "prod", Reason: "connection_refused", Error: "refused"},
 	}
 	var seen []kube.ContextHealth
 	rec := httptest.NewRecorder()

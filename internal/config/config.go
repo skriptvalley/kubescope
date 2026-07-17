@@ -44,9 +44,11 @@ var validAuthModes = map[string]bool{"none": true, "basic": true, "oidc": true}
 type Config struct {
 	// ListenAddr is the host:port the HTTP server binds to.
 	ListenAddr string
-	// KubeconfigPath is the kubeconfig the kube layer will load. Existence is
-	// not validated here: the server must start (and stay up) without one.
-	KubeconfigPath string
+	// KubeconfigSources is the ordered kubeconfig source registry the kube layer
+	// loads (ADR-0008): each entry is a file or a directory, in precedence order.
+	// Existence is not validated here: the server must start (and stay up)
+	// without any usable source.
+	KubeconfigSources []string
 	// ReadOnly rejects all mutating operations server-side when true.
 	ReadOnly bool
 	// AuthMode is one of none|basic|oidc.
@@ -82,12 +84,9 @@ func WithUserHome(fn func() (string, error)) Option { return func(d *deps) { d.u
 // validates the result.
 func Load(opts ...Option) (Config, error) {
 	d := deps{
-		lookupEnv: os.LookupEnv,
-		fileExists: func(path string) bool {
-			info, err := os.Stat(path)
-			return err == nil && !info.IsDir()
-		},
-		userHome: os.UserHomeDir,
+		lookupEnv:  os.LookupEnv,
+		fileExists: statExists,
+		userHome:   os.UserHomeDir,
 	}
 	for _, opt := range opts {
 		opt(&d)
@@ -98,7 +97,7 @@ func Load(opts ...Option) (Config, error) {
 		return Config{}, err
 	}
 
-	kubeconfigPath, err := resolveKubeconfigPath(d)
+	kubeconfigSources, err := resolveKubeconfigSources(d)
 	if err != nil {
 		return Config{}, err
 	}
@@ -146,7 +145,7 @@ func Load(opts ...Option) (Config, error) {
 
 	return Config{
 		ListenAddr:         listenAddr,
-		KubeconfigPath:     kubeconfigPath,
+		KubeconfigSources:  kubeconfigSources,
 		ReadOnly:           readOnly,
 		AuthMode:           authMode,
 		BasicAuthUsername:  basicUser,
@@ -183,25 +182,54 @@ func validatePort(port string) error {
 	return nil
 }
 
-// resolveKubeconfigPath picks the kubeconfig path with the documented
-// precedence: KUBESCOPE_KUBECONFIG, then /kubeconfig if it exists (the
-// container mount point), then $KUBECONFIG, then ~/.kube/config.
-func resolveKubeconfigPath(d deps) (string, error) {
+// resolveKubeconfigSources picks the ordered kubeconfig source registry with the
+// documented precedence (ADR-0008): KUBESCOPE_KUBECONFIG, then /kubeconfig if it
+// exists (the container mount point, a file OR a directory), then $KUBECONFIG,
+// then ~/.kube/config. KUBESCOPE_KUBECONFIG and $KUBECONFIG are split on the OS
+// path-list separator (`:` on Unix) like kubectl, with empty segments dropped;
+// each remaining entry is a file or a directory. Existence is not validated here.
+func resolveKubeconfigSources(d deps) ([]string, error) {
 	if raw, ok := d.lookupEnv(EnvKubeconfig); ok {
-		if raw == "" {
-			return "", fmt.Errorf("parsing %s: must not be empty when set", EnvKubeconfig)
+		sources := splitSources(raw)
+		// Set-but-yielding-zero-entries (empty, or only separators) is a config
+		// mistake, not a fall-through to the defaults.
+		if len(sources) == 0 {
+			return nil, fmt.Errorf("parsing %s: must not be empty when set", EnvKubeconfig)
 		}
-		return raw, nil
+		return sources, nil
 	}
 	if d.fileExists(defaultKubeconfig) {
-		return defaultKubeconfig, nil
+		return []string{defaultKubeconfig}, nil
 	}
-	if raw, ok := d.lookupEnv("KUBECONFIG"); ok && raw != "" {
-		return raw, nil
+	if raw, ok := d.lookupEnv("KUBECONFIG"); ok {
+		if sources := splitSources(raw); len(sources) > 0 {
+			return sources, nil
+		}
 	}
 	home, err := d.userHome()
 	if err != nil {
-		return "", fmt.Errorf("resolving home directory for default kubeconfig: %w", err)
+		return nil, fmt.Errorf("resolving home directory for default kubeconfig: %w", err)
 	}
-	return filepath.Join(home, fallbackKubeconfigRel), nil
+	return []string{filepath.Join(home, fallbackKubeconfigRel)}, nil
+}
+
+// splitSources splits a path-list value on the OS path-list separator, dropping
+// empty segments so a stray leading/trailing/doubled separator never yields a
+// bogus empty source.
+func splitSources(raw string) []string {
+	parts := filepath.SplitList(raw)
+	sources := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			sources = append(sources, p)
+		}
+	}
+	return sources
+}
+
+// statExists reports whether a path is present, accepting a directory as well
+// as a file: the default container mount point may be either (ADR-0008).
+func statExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

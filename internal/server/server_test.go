@@ -52,9 +52,16 @@ func (f *fakeProvider) DiscoveryFor(string) (discovery.DiscoveryInterface, error
 	return f.clientset.Discovery(), f.err
 }
 
-func (f *fakeProvider) KubeconfigPath() string { return "/kubeconfig" }
+func (f *fakeProvider) Sources() []kube.SourceStatus { return nil }
 
-func (f *fakeProvider) SetKubeconfigPath(string) error { return f.err }
+func (f *fakeProvider) SourcePaths() []string { return []string{"/kubeconfig"} }
+
+// AddSource/RemoveSource return typed errors so the writable-mode pass-through
+// test sees the real 422/404 (not a 403) — the read-only guard is what this
+// suite proves, and these confirm the guard let the request reach the handler.
+func (f *fakeProvider) AddSource(path string) error { return &kube.SourceInvisibleError{Path: path} }
+
+func (f *fakeProvider) RemoveSource(id string) error { return &kube.UnknownSourceError{ID: id} }
 
 func (f *fakeProvider) ProbeContext(context.Context, string) kube.ContextHealth {
 	return kube.ContextHealth{Name: "test", Reachable: true, AuthOK: true, ServerVersion: "v1.33.0"}

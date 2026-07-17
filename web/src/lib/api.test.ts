@@ -141,13 +141,13 @@ describe("api.contexts", () => {
 });
 
 describe("api.setup", () => {
-  it("fetches the setup state", async () => {
+  it("fetches the setup state with its kubeconfig sources", async () => {
     const fetchStub = stubFetch({
       ok: true,
       status: 200,
       json: async () => ({
         state: "ready",
-        kubeconfigPath: "/kubeconfig",
+        kubeconfigSources: ["/kubeconfig", "/extra"],
         activeContext: "prod",
         canSetKubeconfig: true,
       }),
@@ -156,22 +156,80 @@ describe("api.setup", () => {
     const state = await api.setup.state();
     expect(state.state).toBe("ready");
     expect(state.activeContext).toBe("prod");
+    expect(state.kubeconfigSources).toEqual(["/kubeconfig", "/extra"]);
     expect(fetchStub).toHaveBeenCalledWith("/api/v1/setup", expect.anything());
   });
+});
 
-  it("PUTs the path when repointing the kubeconfig and returns the fresh state", async () => {
+describe("api.kubeconfigs", () => {
+  const listing = {
+    sources: [
+      {
+        id: "abc123",
+        path: "/kubeconfig",
+        kind: "dir",
+        origin: "env",
+        status: "ok",
+        files: [{ path: "/kubeconfig/a.yaml", status: "ok", contexts: ["kind-a"] }],
+        contexts: ["kind-a"],
+      },
+    ],
+    canSetKubeconfig: true,
+  };
+
+  it("GETs the source listing", async () => {
+    const fetchStub = stubFetch({ ok: true, status: 200, json: async () => listing });
+
+    const result = await api.kubeconfigs.list();
+    expect(result.canSetKubeconfig).toBe(true);
+    expect(result.sources[0].id).toBe("abc123");
+    expect(fetchStub).toHaveBeenCalledWith("/api/v1/kubeconfigs", expect.anything());
+  });
+
+  it("POSTs the path when adding a source and returns the fresh listing", async () => {
+    const fetchStub = stubFetch({ ok: true, status: 200, json: async () => listing });
+
+    const result = await api.kubeconfigs.add("/kubeconfig");
+    expect(result.sources).toHaveLength(1);
+    expect(fetchStub).toHaveBeenCalledWith(
+      "/api/v1/kubeconfigs",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ path: "/kubeconfig" }) }),
+    );
+  });
+
+  it("DELETEs a source by id and returns the fresh listing", async () => {
     const fetchStub = stubFetch({
       ok: true,
       status: 200,
-      json: async () => ({ state: "ready", kubeconfigPath: "/other", canSetKubeconfig: true }),
+      json: async () => ({ sources: [], canSetKubeconfig: true }),
     });
 
-    const state = await api.setup.setKubeconfig("/other");
-    expect(state.kubeconfigPath).toBe("/other");
+    const result = await api.kubeconfigs.remove("abc123");
+    expect(result.sources).toHaveLength(0);
     expect(fetchStub).toHaveBeenCalledWith(
-      "/api/v1/kubeconfig",
-      expect.objectContaining({ method: "PUT", body: JSON.stringify({ path: "/other" }) }),
+      "/api/v1/kubeconfigs/abc123",
+      expect.objectContaining({ method: "DELETE" }),
     );
+  });
+
+  it("surfaces the backend guidance envelope on a rejected add", async () => {
+    stubFetch({
+      ok: false,
+      status: 422,
+      json: async () => ({
+        error: {
+          code: "kubeconfig_invalid",
+          message: "path not visible",
+          guidance: "mount a directory once (-v ~/.kube:/kubeconfigs:ro)",
+        },
+      }),
+    });
+
+    const err = (await api.kubeconfigs.add("/missing").catch((e: unknown) => e)) as ApiError;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.code).toBe("kubeconfig_invalid");
+    expect(err.status).toBe(422);
+    expect(err.guidance).toContain("mount a directory");
   });
 });
 

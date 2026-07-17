@@ -56,16 +56,16 @@ All configuration is via `KUBESCOPE_`-prefixed environment variables:
 |---|---|---|
 | `KUBESCOPE_LISTEN_ADDR` | `127.0.0.1:8080` (binary); `0.0.0.0:8080` (image) | `host:port` to bind. |
 | `KUBESCOPE_PORT` | — | Overrides only the **port** part of the listen address. |
-| `KUBESCOPE_KUBECONFIG` | `/kubeconfig` if present, else `$KUBECONFIG`, else `~/.kube/config` | Path to the kubeconfig to load. |
+| `KUBESCOPE_KUBECONFIG` | `/kubeconfig` if present, else `$KUBECONFIG`, else `~/.kube/config` | Kubeconfig **source list**: colon-separated paths, each a file **or a directory** of kubeconfig files, merged with kubectl precedence (first occurrence of a name wins). A single path behaves as before. See [ADR-0008](docs/adr/0008-kubeconfig-source-registry.md). |
 | `KUBESCOPE_READ_ONLY` | `false` | When `true`, rejects all mutating operations server-side. |
 | `KUBESCOPE_AUTH_MODE` | `none` | `none` \| `basic` \| `oidc` (see Authentication). |
 | `KUBESCOPE_AUTH_BASIC_USERNAME` | — | Basic-auth username. Required when `KUBESCOPE_AUTH_MODE=basic`. |
 | `KUBESCOPE_AUTH_BASIC_PASSWORD` | — | Basic-auth password. Required when `KUBESCOPE_AUTH_MODE=basic`. Never logged. |
-| `KUBESCOPE_ALLOW_KUBECONFIG_SET` | `false` | When `true`, enables `PUT /api/v1/kubeconfig` so the UI can repoint Kubescope at another kubeconfig **path** at runtime (path must be readable by the process — in Docker, a mounted volume). Always rejected in read-only mode; the override is in-memory and a restart reverts to the configured path. See [ADR-0007](docs/adr/0007-runtime-kubeconfig-source.md). |
+| `KUBESCOPE_ALLOW_KUBECONFIG_SET` | `false` | When `true`, enables the kubeconfig **source registry** endpoints (`POST`/`DELETE /api/v1/kubeconfigs`) so the UI can add/remove kubeconfig sources — files or directories — at runtime (paths must be readable by the process — in Docker, under a mounted volume). Always rejected in read-only mode; changes are in-memory and a restart reverts to `KUBESCOPE_KUBECONFIG`. See [ADR-0008](docs/adr/0008-kubeconfig-source-registry.md). |
 
 ## Connecting to clusters
 
-Kubescope parses the mounted kubeconfig, enumerates its contexts, and builds a connection per context. Kubeconfigs with **embedded** certificate/token data (the common dev/UAT case) work as-is. Some auth styles need extra care inside a container — full details in [ADR-0004](docs/adr/0004-cluster-auth-and-kubeconfig-in-docker.md):
+Kubescope parses the mounted kubeconfig(s), enumerates their contexts, and builds a connection per context. Kubeconfigs with **embedded** certificate/token data (the common dev/UAT case) work as-is. Some auth styles need extra care inside a container — full details in [ADR-0004](docs/adr/0004-cluster-auth-and-kubeconfig-in-docker.md):
 
 - **Local clusters (kind / minikube / k3d)** advertise their API server on `127.0.0.1:<port>`, which inside a container is the container itself. On **Linux**, run with `--network host` (drop `-p`). On **macOS/Windows**, rewrite the server address to `host.docker.internal:<port>` in a copy of the kubeconfig; the cluster cert usually lacks that SAN, so pair it with `insecure-skip-tls-verify: true` (local dev only).
 - **exec-plugin auth (EKS `aws eks get-token`, GKE `gke-gcloud-auth-plugin`)** spawns a host CLI that the slim image does not contain. Either bundle the CLI + mount cloud creds, or pre-generate a token on the host and mount a token-based kubeconfig (tokens expire — refresh manually). Kubescope surfaces a clear per-context error when the plugin binary is missing.
@@ -76,7 +76,19 @@ Kubescope parses the mounted kubeconfig, enumerates its contexts, and builds a c
 
 Kubescope never dead-ends on a cluster problem. With no kubeconfig (or an empty/broken one) it starts anyway and shows a **guided setup page** instead of an error, and every connectivity failure is classified — connection refused, DNS, TLS, missing exec plugin, expired auth, RBAC denial, timeout, API-server error — with an inline fix suggestion and a doc link at the point of failure. If the active cluster goes away while you're viewing it (e.g. `kind delete cluster`), live views show an unreachable banner, polling backs off, and everything resumes automatically when the cluster returns; switching to a healthy context always works in the meantime.
 
-To point a running instance at a different kubeconfig from the UI, start it with `KUBESCOPE_ALLOW_KUBECONFIG_SET=true` (see Configuration).
+### Multiple kubeconfigs and adding clusters at runtime
+
+If you keep one kubeconfig file per cluster instead of a single merged file, mount the whole directory once and point Kubescope at it:
+
+```sh
+docker run --rm -p 8080:8080 -v ~/.kube:/kubeconfig:ro ghcr.io/skriptvalley/kubescope:latest
+```
+
+Every parseable kubeconfig file in the directory is loaded and merged with kubectl semantics (first occurrence of a context/cluster/user name wins; broken or oversized files are skipped and reported per file, never as a global failure). `KUBESCOPE_KUBECONFIG` also accepts an explicit colon-separated list mixing files and directories, e.g. `-e KUBESCOPE_KUBECONFIG=/kubeconfigs:/extra/staging.yaml`.
+
+Because directories are re-scanned on every request, **dropping a new file into a mounted directory registers its clusters without a restart** — this is the supported way to add a cluster to a running container, since Docker has no runtime mounts. The UI's *Manage kubeconfig sources* surface (context-switcher menu, or the setup page before a connection) lists every source with per-file status and shadowed names, and offers a rescan.
+
+To add or remove **sources** from the UI at runtime, start with `KUBESCOPE_ALLOW_KUBECONFIG_SET=true` (see Configuration). Runtime changes are in-memory only — a restart reverts to the configured baseline. Details in [ADR-0008](docs/adr/0008-kubeconfig-source-registry.md).
 
 ## Status
 
@@ -101,7 +113,7 @@ Run `make help` for all targets (build, lint, docker-build, kind-up, smoke, …)
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, components, data flows |
 | [docs/BUILD-PLAN.md](docs/BUILD-PLAN.md) | Sprint plan (0–8) and v2 backlog |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |
-| [docs/adr/](docs/adr/) | Architecture decision records (0001–0007) |
+| [docs/adr/](docs/adr/) | Architecture decision records (0001–0008) |
 
 ## License
 

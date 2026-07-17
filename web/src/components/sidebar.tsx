@@ -4,6 +4,7 @@ import { NavLink } from "react-router-dom";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDiscovery } from "@/hooks/use-discovery";
+import { useSetupState } from "@/hooks/use-setup";
 import { api, ApiError } from "@/lib/api";
 import { buildNav } from "@/lib/discovery-nav";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ const pinned = [
 
 export function Sidebar() {
   const { data, isPending, isError, error } = useDiscovery();
+  const { data: setup } = useSetupState();
   const queryClient = useQueryClient();
   // Explicit refresh: force a server-side re-discovery (picks up a CRD
   // installed after startup) and replace the cached result.
@@ -59,9 +61,18 @@ export function Sidebar() {
               ))}
             </div>
           ) : isError ? (
-            <p className="text-xs text-destructive">
-              {error instanceof ApiError ? error.message : "Discovery failed"}
-            </p>
+            // FB-9: before the server has a usable cluster (setup not ready, or
+            // still loading), discovery failing is expected, not an error — show a
+            // muted placeholder. A genuine mid-session failure (setup ready) is red.
+            setup?.state === "ready" ? (
+              <p className="text-xs text-destructive">
+                {error instanceof ApiError ? error.message : "Discovery failed"}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground" data-testid="sidebar-waiting">
+                Waiting for a cluster connection…
+              </p>
+            )
           ) : (
             <div className="space-y-4">
               {data?.warnings && data.warnings.length > 0 && (

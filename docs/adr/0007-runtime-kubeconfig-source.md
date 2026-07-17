@@ -1,6 +1,6 @@
 # 0007. Runtime kubeconfig source: path-only, opt-in
 
-- **Status:** Accepted
+- **Status:** Superseded by [0008](0008-kubeconfig-source-registry.md)
 - **Date:** 2026-07-17
 
 ## Context

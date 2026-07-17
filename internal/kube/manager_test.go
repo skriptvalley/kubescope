@@ -50,6 +50,10 @@ func writeConfig(t *testing.T, cfg clientcmdapi.Config) string {
 	return path
 }
 
+// newManager wraps NewManager for the common single- and multi-source test
+// cases: the registry takes an ordered path list, and most tests seed one file.
+func newManager(paths ...string) *Manager { return NewManager(paths) }
+
 // tokenAuth builds an embedded-token AuthInfo (the preferred, works-as-is form).
 func tokenAuth() *clientcmdapi.AuthInfo { return &clientcmdapi.AuthInfo{Token: "embedded-token"} }
 
@@ -67,7 +71,7 @@ func TestContextsEnumeration(t *testing.T) {
 		},
 		CurrentContext: "beta",
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 
 	infos, err := m.Contexts()
 	require.NoError(t, err)
@@ -92,7 +96,7 @@ func TestSwitchContext(t *testing.T) {
 		},
 		CurrentContext: "one",
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 
 	require.NoError(t, m.SwitchContext("two"))
 	active, err := m.ActiveContextName()
@@ -126,7 +130,7 @@ func TestSwitchObserverNotifiedWithNewContext(t *testing.T) {
 		},
 		CurrentContext: "one",
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 
 	var got []string
 	m.SetSwitchObserver(func(current string) { got = append(got, current) })
@@ -148,7 +152,7 @@ func TestRestConfigForReturnsIndependentCopy(t *testing.T) {
 		// CurrentContext intentionally set so ActiveContextName resolves.
 		CurrentContext: "one",
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 
 	rc, err := m.RestConfigFor("one")
 	require.NoError(t, err)
@@ -177,7 +181,7 @@ func TestSwitchContextNeverWritesKubeconfig(t *testing.T) {
 	before, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	m := NewManager(path)
+	m := newManager(path)
 	require.NoError(t, m.SwitchContext("two"))
 
 	// The #1 Sprint 1 invariant: the mounted kubeconfig is strictly read-only;
@@ -204,7 +208,7 @@ func TestClientsetForCachesAndResolvesFilePathCA(t *testing.T) {
 		Contexts:       map[string]*clientcmdapi.Context{"ctx": {Cluster: "c", AuthInfo: "u"}},
 		CurrentContext: "ctx",
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 
 	cs1, err := m.ClientsetFor("ctx")
 	require.NoError(t, err)
@@ -222,7 +226,7 @@ func TestClientsetForMissingFilePathCA(t *testing.T) {
 		Contexts:       map[string]*clientcmdapi.Context{"ctx": {Cluster: "c", AuthInfo: "u"}},
 		CurrentContext: "ctx",
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 
 	_, err := m.ClientsetFor("ctx")
 	require.Error(t, err, "an unmounted file-path CA surfaces as an error, not a panic")
@@ -231,21 +235,27 @@ func TestClientsetForMissingFilePathCA(t *testing.T) {
 func TestMalformedKubeconfigIsStructuredError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kubeconfig")
 	require.NoError(t, os.WriteFile(path, []byte("this: is: not: valid: kubeconfig: ["), 0o600))
-	m := NewManager(path)
+	m := newManager(path)
 
+	// A single unparseable file yields zero usable sources — a typed error that
+	// summarizes paths+statuses (never contents) and keeps the server up.
 	_, err := m.Contexts()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "loading kubeconfig")
+	var noUsable *NoUsableSourceError
+	require.ErrorAs(t, err, &noUsable)
+	assert.Contains(t, err.Error(), "unparseable")
 
 	_, err = m.ActiveContextName()
 	require.Error(t, err)
 }
 
 func TestMissingKubeconfigIsStructuredError(t *testing.T) {
-	m := NewManager(filepath.Join(t.TempDir(), "absent"))
+	m := newManager(filepath.Join(t.TempDir(), "absent"))
 	_, err := m.Contexts()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "loading kubeconfig")
+	var noUsable *NoUsableSourceError
+	require.ErrorAs(t, err, &noUsable)
+	assert.Contains(t, err.Error(), "missing")
 }
 
 // singleContextConfig builds a minimal valid kubeconfig with one context.
@@ -260,74 +270,131 @@ func singleContextConfig(t *testing.T, ctxName string) clientcmdapi.Config {
 	}
 }
 
-func TestSetKubeconfigPathRejectsRelative(t *testing.T) {
-	m := NewManager(writeConfig(t, singleContextConfig(t, "one")))
-	require.Error(t, m.SetKubeconfigPath("relative/kubeconfig"), "a relative path is rejected")
-	require.Error(t, m.SetKubeconfigPath(""), "an empty path is rejected")
+func TestAddSourceRejectsInvalidPaths(t *testing.T) {
+	m := newManager(writeConfig(t, singleContextConfig(t, "one")))
+	require.Error(t, m.AddSource("relative/kubeconfig"), "a relative path is rejected")
+	require.Error(t, m.AddSource(""), "an empty path is rejected")
+	assert.Len(t, m.SourcePaths(), 1, "a rejected add leaves the env baseline untouched")
+	assert.EqualValues(t, 0, m.SourceGeneration())
 }
 
-func TestSetKubeconfigPathMissingFileLeavesSourceIntact(t *testing.T) {
+func TestAddSourceInvisiblePathLeavesRegistryIntact(t *testing.T) {
 	pathA := writeConfig(t, singleContextConfig(t, "alpha"))
-	m := NewManager(pathA)
+	m := newManager(pathA)
 
-	err := m.SetKubeconfigPath(filepath.Join(t.TempDir(), "does-not-exist"))
-	require.Error(t, err, "a missing candidate file is rejected")
+	fired := 0
+	m.SetSourceObserver(func() { fired++ })
 
-	// The previous source is untouched — a typo never loses a working config.
-	assert.Equal(t, pathA, m.KubeconfigPath())
+	err := m.AddSource(filepath.Join(t.TempDir(), "does-not-exist"))
+	var invisible *SourceInvisibleError
+	require.ErrorAs(t, err, &invisible, "an unstattable path is a SourceInvisibleError (handler: 422 + mounted-dir guidance)")
+
+	// Validate-before-commit: the registry is untouched, the generation is not
+	// bumped, and the observer never fires on a failed mutation.
+	assert.Equal(t, []string{pathA}, m.SourcePaths())
+	assert.EqualValues(t, 0, m.SourceGeneration())
+	assert.Equal(t, 0, fired)
 	infos, cerr := m.Contexts()
 	require.NoError(t, cerr)
 	require.Len(t, infos, 1)
 	assert.Equal(t, "alpha", infos[0].Name, "the prior kubeconfig still serves contexts")
 }
 
-func TestSetKubeconfigPathRejectsNoContexts(t *testing.T) {
+func TestAddSourceRejectsFileWithNoContexts(t *testing.T) {
 	pathA := writeConfig(t, singleContextConfig(t, "alpha"))
-	m := NewManager(pathA)
+	m := newManager(pathA)
 
 	empty := writeConfig(t, clientcmdapi.Config{})
-	err := m.SetKubeconfigPath(empty)
-	require.Error(t, err, "a kubeconfig with no contexts is rejected")
+	err := m.AddSource(empty)
+	require.Error(t, err, "a file source with no contexts is rejected")
 	assert.Contains(t, err.Error(), "no contexts")
-	assert.Equal(t, pathA, m.KubeconfigPath(), "the prior source is unchanged")
+	assert.Equal(t, []string{pathA}, m.SourcePaths(), "the registry is unchanged")
+	assert.EqualValues(t, 0, m.SourceGeneration())
 }
 
-func TestSetKubeconfigPathSwapsAndResetsState(t *testing.T) {
-	pathA := writeConfig(t, clientcmdapi.Config{
-		Clusters:  map[string]*clientcmdapi.Cluster{"c": {Server: "https://c:6443", CertificateAuthorityData: testCACert(t)}},
-		AuthInfos: map[string]*clientcmdapi.AuthInfo{"u": tokenAuth()},
-		Contexts: map[string]*clientcmdapi.Context{
-			"alpha": {Cluster: "c", AuthInfo: "u"},
-			"beta":  {Cluster: "c", AuthInfo: "u"},
-		},
-		CurrentContext: "beta",
-	})
-	pathB := writeConfig(t, singleContextConfig(t, "gamma"))
-	m := NewManager(pathA)
+func TestAddSourceRejectsDuplicate(t *testing.T) {
+	pathA := writeConfig(t, singleContextConfig(t, "alpha"))
+	m := newManager(pathA)
 
-	// Set an active override and populate the per-context client cache.
-	require.NoError(t, m.SwitchContext("alpha"))
-	_, err := m.ClientsetFor("beta")
+	err := m.AddSource(pathA)
+	var dup *DuplicateSourceError
+	require.ErrorAs(t, err, &dup, "re-adding a registered path is a DuplicateSourceError (handler: 409)")
+	assert.Equal(t, []string{pathA}, m.SourcePaths())
+	assert.EqualValues(t, 0, m.SourceGeneration())
+}
+
+func TestRemoveSourceUnknownID(t *testing.T) {
+	m := newManager(writeConfig(t, singleContextConfig(t, "alpha")))
+	err := m.RemoveSource("deadbeef0000")
+	var unknown *UnknownSourceError
+	require.ErrorAs(t, err, &unknown, "removing an unregistered id is an UnknownSourceError (handler: 404)")
+	assert.EqualValues(t, 0, m.SourceGeneration())
+}
+
+func TestAddRemoveSourceMutatesAndResetsState(t *testing.T) {
+	pathA := writeConfig(t, singleContextConfig(t, "alpha"))
+	pathB := writeConfig(t, singleContextConfig(t, "beta"))
+	m := newManager(pathA)
+
+	// Populate the per-context client cache before mutating.
+	_, err := m.ClientsetFor("alpha")
 	require.NoError(t, err)
 	m.mu.RLock()
-	require.NotEmpty(t, m.clients, "cache populated before swap")
+	require.NotEmpty(t, m.clients, "cache populated before the mutation")
 	m.mu.RUnlock()
 
-	require.NoError(t, m.SetKubeconfigPath(pathB))
+	require.NoError(t, m.AddSource(pathB))
+	assert.Equal(t, []string{pathA, pathB}, m.SourcePaths(), "the new source is appended in precedence order")
 
-	assert.Equal(t, pathB, m.KubeconfigPath())
+	// Both files' contexts are now visible via the merge.
 	infos, err := m.Contexts()
 	require.NoError(t, err)
-	require.Len(t, infos, 1)
-	assert.Equal(t, "gamma", infos[0].Name, "contexts reflect the new file immediately")
+	names := make([]string, len(infos))
+	for i, in := range infos {
+		names[i] = in.Name
+	}
+	assert.Equal(t, []string{"alpha", "beta"}, names, "the merged config exposes both contexts")
 
+	// The client cache was reset — context names may now resolve to a different file.
+	m.mu.RLock()
+	assert.Empty(t, m.clients, "the per-context client cache was reset on mutation")
+	m.mu.RUnlock()
+
+	// Removing the first source by id drops it; the registry may shrink freely.
+	require.NoError(t, m.RemoveSource(sourceID(pathA)))
+	assert.Equal(t, []string{pathB}, m.SourcePaths())
 	active, err := m.ActiveContextName()
 	require.NoError(t, err)
-	assert.Equal(t, "gamma", active, "the stale active override was cleared; new current-context wins")
+	assert.Equal(t, "beta", active, "current-context resolves from the remaining source")
+}
 
-	m.mu.RLock()
-	assert.Empty(t, m.clients, "the per-context client cache was reset")
-	m.mu.RUnlock()
+func TestRemoveActiveSourceFallsBack(t *testing.T) {
+	// Source A defines a context but no current-context; source B supplies the
+	// merged current-context we make active. Removing B strands the override, and
+	// resolveActive must fall back — with no current-context left, to the
+	// no-active-context path (the override is kept in memory, not resolvable).
+	noCurrent := clientcmdapi.Config{
+		Clusters:  map[string]*clientcmdapi.Cluster{"c": {Server: "https://c:6443", CertificateAuthorityData: testCACert(t)}},
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{"u": tokenAuth()},
+		Contexts:  map[string]*clientcmdapi.Context{"alpha": {Cluster: "c", AuthInfo: "u"}},
+	}
+	pathA := writeConfig(t, noCurrent)
+	pathB := writeConfig(t, singleContextConfig(t, "beta"))
+	m := newManager(pathA, pathB)
+
+	require.NoError(t, m.SwitchContext("beta"))
+	active, err := m.ActiveContextName()
+	require.NoError(t, err)
+	require.Equal(t, "beta", active)
+
+	require.NoError(t, m.RemoveSource(sourceID(pathB)))
+
+	_, err = m.ActiveContextName()
+	require.Error(t, err, "a stranded override with no current-context falls back to the no-active-context error")
+	infos, cerr := m.Contexts()
+	require.NoError(t, cerr)
+	require.Len(t, infos, 1)
+	assert.Equal(t, "alpha", infos[0].Name, "listing still works against the surviving source")
 }
 
 func TestProbeContext(t *testing.T) {
@@ -337,7 +404,7 @@ func TestProbeContext(t *testing.T) {
 		Contexts:       map[string]*clientcmdapi.Context{"ctx": {Cluster: "c", AuthInfo: "u"}},
 		CurrentContext: "ctx",
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 
 	h := m.ProbeContext(context.Background(), "ctx")
 	assert.Equal(t, "ctx", h.Name)
@@ -360,7 +427,7 @@ func TestClassifyActiveErrorUsesActiveHints(t *testing.T) {
 		Contexts:       map[string]*clientcmdapi.Context{"ctx": {Cluster: "c", AuthInfo: "exec"}},
 		CurrentContext: "ctx",
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 
 	// Loopback hint drives connection-refused remediation for the active context.
 	refused := m.ClassifyActiveError(errors.New("connect: connection refused"))
@@ -381,7 +448,7 @@ func TestNoCurrentContext(t *testing.T) {
 		Contexts:  map[string]*clientcmdapi.Context{"solo": {Cluster: "c", AuthInfo: "u"}},
 		// No current-context and no switch: listing works, no context is active.
 	}
-	m := NewManager(writeConfig(t, cfg))
+	m := newManager(writeConfig(t, cfg))
 
 	infos, err := m.Contexts()
 	require.NoError(t, err)
@@ -420,7 +487,7 @@ func TestProbeEvictsStaleCachedClient(t *testing.T) {
 
 	// The kubeconfig first names a dead endpoint; the client gets cached.
 	path := writeConfig(t, cfgAt("http://127.0.0.1:1"))
-	m := NewManager(path)
+	m := newManager(path)
 	_, err := m.ClientsetFor("ctx")
 	require.NoError(t, err)
 	m.mu.RLock()
@@ -445,29 +512,29 @@ func TestProbeEvictsStaleCachedClient(t *testing.T) {
 	assert.Equal(t, "v1.33.0", v.GitVersion)
 }
 
-// TestSetKubeconfigPathBumpsGenerationAndNotifies pins the source-swap contract
-// (ADR-0007 + PR review): a successful swap increments SourceGeneration (so
-// context-keyed caches key away from the old file's same-named contexts) and
-// fires the source observer (so live exec/port-forward sessions are torn down);
-// a failed swap does neither.
-func TestSetKubeconfigPathBumpsGenerationAndNotifies(t *testing.T) {
+// TestRegistryMutationBumpsGenerationAndNotifies pins the mutation contract
+// (ADR-0008): every successful AddSource/RemoveSource increments SourceGeneration
+// (so context-keyed caches key away from the old set's same-named contexts) and
+// fires the source observer exactly once (so live exec/port-forward sessions are
+// torn down); a failed mutation does neither.
+func TestRegistryMutationBumpsGenerationAndNotifies(t *testing.T) {
 	pathA := writeConfig(t, singleContextConfig(t, "alpha"))
 	pathB := writeConfig(t, singleContextConfig(t, "beta"))
-	m := NewManager(pathA)
+	m := newManager(pathA)
 
 	fired := 0
 	m.SetSourceObserver(func() { fired++ })
 	require.EqualValues(t, 0, m.SourceGeneration())
 
-	require.Error(t, m.SetKubeconfigPath(filepath.Join(t.TempDir(), "missing")))
-	assert.EqualValues(t, 0, m.SourceGeneration(), "a failed swap must not bump the generation")
-	assert.Equal(t, 0, fired, "a failed swap must not notify")
+	require.Error(t, m.AddSource(filepath.Join(t.TempDir(), "missing")))
+	assert.EqualValues(t, 0, m.SourceGeneration(), "a failed add must not bump the generation")
+	assert.Equal(t, 0, fired, "a failed add must not notify")
 
-	require.NoError(t, m.SetKubeconfigPath(pathB))
+	require.NoError(t, m.AddSource(pathB))
 	assert.EqualValues(t, 1, m.SourceGeneration())
-	assert.Equal(t, 1, fired, "a successful swap notifies exactly once")
+	assert.Equal(t, 1, fired, "a successful add notifies exactly once")
 
-	require.NoError(t, m.SetKubeconfigPath(pathA))
+	require.NoError(t, m.RemoveSource(sourceID(pathB)))
 	assert.EqualValues(t, 2, m.SourceGeneration())
-	assert.Equal(t, 2, fired)
+	assert.Equal(t, 2, fired, "a successful remove notifies exactly once")
 }

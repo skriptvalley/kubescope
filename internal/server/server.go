@@ -113,6 +113,11 @@ func New(opts Options) http.Handler {
 		if hub != nil {
 			onHealth = hub.SyncContextHealth
 		}
+		// canSetKubeconfig folds the runtime source-registry flag with read-only
+		// mode: the controls are available only when enabled AND not read-only. It
+		// is the same value the setup endpoint and the /kubeconfigs listing report,
+		// so the UI gates on one server-computed truth (ADR-0008).
+		canSetKubeconfig := opts.AllowKubeconfigSet && !opts.ReadOnly
 		api.Route("/v1", func(v1 chi.Router) {
 			v1.Get("/nodes", resources.NodesHandler(opts.Kube, opts.Logger))
 			v1.Get("/contexts", resources.ContextsHandler(opts.Kube, opts.Logger))
@@ -129,7 +134,12 @@ func New(opts Options) http.Handler {
 			// Unguarded and cluster-independent, so it answers even with no
 			// kubeconfig; canSetKubeconfig is reported false under read-only.
 			v1.Get("/setup", resources.SetupStateHandler(
-				opts.Kube, opts.AllowKubeconfigSet && !opts.ReadOnly, opts.Logger, onHealth))
+				opts.Kube, canSetKubeconfig, opts.Logger, onHealth))
+			// Kubeconfig source registry listing (ADR-0008): always readable like
+			// /setup — cluster-independent, re-scanned per request, so a UI "Rescan"
+			// is a plain refetch. The mutations live in the read-only group below.
+			v1.Get("/kubeconfigs", resources.ListKubeconfigSourcesHandler(
+				opts.Kube, canSetKubeconfig, opts.Logger))
 			// Generic resource engine: any GVR via the dynamic client. The
 			// core group travels as the literal token "core" in the path.
 			v1.Get("/resources/{group}/{version}/{resource}", resources.ListHandler(opts.Kube, disco, opts.Logger))
@@ -173,10 +183,11 @@ func New(opts Options) http.Handler {
 			// registered outside this group.
 			v1.Group(func(m chi.Router) {
 				m.Use(readOnlyGuard(opts.ReadOnly))
-				// Repointing the kubeconfig source at runtime is a mutation of
-				// server state (ADR-0007), so it lives behind the read-only guard;
-				// the AllowKubeconfigSet flag gates it further inside the handler.
-				m.Put("/kubeconfig", resources.SetKubeconfigHandler(opts.Kube, opts.AllowKubeconfigSet, opts.Logger))
+				// Registering/dropping a kubeconfig source at runtime mutates server
+				// state (ADR-0008), so both live behind the read-only guard; the
+				// AllowKubeconfigSet flag gates them further inside the handlers.
+				m.Post("/kubeconfigs", resources.AddKubeconfigSourceHandler(opts.Kube, opts.AllowKubeconfigSet, opts.Logger))
+				m.Delete("/kubeconfigs/{id}", resources.RemoveKubeconfigSourceHandler(opts.Kube, opts.AllowKubeconfigSet, opts.Logger))
 				m.Put("/resources/{group}/{version}/{resource}/{name}", resources.UpdateHandler(opts.Kube, disco, opts.Logger))
 				m.Delete("/resources/{group}/{version}/{resource}/{name}", resources.DeleteHandler(opts.Kube, disco, opts.Logger))
 				m.Post("/workloads/{resource}/{namespace}/{name}/scale", resources.ScaleHandler(opts.Kube, opts.Logger))
