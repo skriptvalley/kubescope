@@ -6,7 +6,8 @@ const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElemen
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)}
+      // Dusk cards carry a hairline ring (shadow-ring) instead of a border.
+      className={cn("rounded-lg bg-card text-card-foreground shadow-ring", className)}
       {...props}
     />
   ),

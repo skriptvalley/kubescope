@@ -40,7 +40,8 @@ flowchart LR
 | Typed workload handlers | `internal/resources` | Shaped summaries for Pods/Deployments/StatefulSets/DaemonSets/ReplicaSets/Jobs/CronJobs; scale, rollout-restart, cordon/drain |
 | Watch/log/exec streaming | `internal/stream` | Informer→SSE fan-out per context, pod log follow over SSE, exec over WebSocket⇆SPDY, port-forward ([adr/0006](adr/0006-live-updates-sse-and-streaming-websocket.md)) |
 | Env config | `internal/config` | Load + validate `KUBESCOPE_*` env vars |
-| Frontend | `web/` | Thin React SPA; all server state via TanStack Query; backend does aggregation/shaping |
+| Frontend | `web/` | Thin React SPA; all server state via TanStack Query; backend does aggregation/shaping. Styled with the skriptvalley **Dusk** design system ([adr/0009](adr/0009-dusk-design-system.md)): OKLCH tokens over Tailwind + shadcn primitives, self-hosted Space Grotesk / Geist / Geist Mono (no CDN), light/system/dark theme toggle |
+| Data enhancements | `internal/resources` | Pod CPU/Memory via the dynamic client against `metrics.k8s.io` (degrades when metrics-server absent), best-effort per-type sidebar counts, namespace ResourceQuota bars ([adr/0009](adr/0009-dusk-design-system.md)) |
 
 ## Data flows
 
@@ -119,5 +120,5 @@ docker run --rm -p 8080:8080 -v ~/.kube/config:/kubeconfig:ro ghcr.io/skriptvall
 Deliberate extension points — no restructuring needed:
 
 - **Resource-graph service** — new `internal/graph` package consuming the existing discovery cache and per-context dynamic clients from `internal/kube`/`internal/resources`. Edges come from `ownerReferences`, label selectors, and config/secret/volume refs already present in fetched objects; exposed as new routes in `internal/server` and a new SPA view. Nothing in the current packages changes.
-- **Metrics adapter** — new `internal/metrics` package wrapping the metrics-server API using the same per-context `rest.Config` from `internal/kube`. Workload/node detail views gain optional CPU/mem panels that degrade gracefully when metrics-server is absent.
+- **Metrics adapter** — pod CPU/Memory shipped in ADR-0009 by reading `metrics.k8s.io/v1beta1` through the existing per-context **dynamic client** (no new package/dependency), degrading to `—` when metrics-server is absent. A dedicated `internal/metrics` package (or the typed `k8s.io/metrics` client) remains the seam if node metrics or richer aggregation are ever needed.
 - **Multi-cluster side-by-side** — `internal/kube` already caches clients per context; side-by-side is a routing + UI concern, not a backend rework.

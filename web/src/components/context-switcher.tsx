@@ -2,17 +2,29 @@ import { Check, ChevronsUpDown, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { KubeconfigSourcesDialog } from "@/components/kubeconfig-sources";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   useContexts,
   useContextsHealth,
   useSwitchContext,
 } from "@/hooks/use-contexts";
 import { useSetupState } from "@/hooks/use-setup";
-import { ApiError } from "@/lib/api";
+import { ApiError, type ContextHealth } from "@/lib/api";
 import { healthBadge } from "@/lib/context-health";
+import { toneStyles } from "@/lib/tone-style";
 import { cn } from "@/lib/utils";
+import type { StatusTone } from "@/lib/workload-status";
+
+/** Maps a per-context probe to a Dusk tone: Healthy→ok (teal), Unreachable/Auth
+ *  error→warn (red), Checking→neutral. Reuses the shared badge copy/title. */
+function healthTone(
+  health: ContextHealth | undefined,
+  pending: boolean,
+): { tone: StatusTone; label: string; title: string } {
+  const b = healthBadge(health, pending);
+  const tone: StatusTone =
+    b.variant === "default" ? "ok" : b.variant === "destructive" ? "warn" : "neutral";
+  return { tone, label: b.label, title: b.title };
+}
 
 export function ContextSwitcher() {
   const [open, setOpen] = useState(false);
@@ -58,6 +70,9 @@ export function ContextSwitcher() {
   const healthByName = new Map((health ?? []).map((h) => [h.name, h]));
   const canManage = setup?.canSetKubeconfig ?? false;
 
+  const activeTone = active ? healthTone(healthByName.get(active.name), healthPending).tone : "neutral";
+  const dotClass = toneStyles[activeTone].dot;
+
   const label = switchContext.isPending
     ? "Switching…"
     : (active?.name ?? (isPending ? "Loading…" : "Select context"));
@@ -69,63 +84,73 @@ export function ContextSwitcher() {
   }
 
   return (
-    <div className="relative" ref={ref}>
-      <Button
+    <div className="relative shrink-0" ref={ref}>
+      <button
         ref={triggerRef}
-        variant="outline"
-        size="sm"
-        className="min-w-52 justify-between"
+        type="button"
         onClick={() => setOpen((o) => !o)}
         disabled={isPending || switchContext.isPending}
         aria-haspopup="true"
         aria-expanded={open}
         aria-label="Switch context"
+        className="inline-flex h-8 min-w-[200px] items-center justify-between gap-1.5 rounded-md border bg-background px-2.5 text-[13px] font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-60"
       >
-        <span className="truncate">{label}</span>
-        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-      </Button>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className={cn("h-[7px] w-[7px] shrink-0 rounded-full", dotClass)} aria-hidden="true" />
+          <span className="truncate font-mono text-[12.5px]">{label}</span>
+        </span>
+        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+      </button>
       {open && contexts && contexts.length > 0 && (
-        <ul className="absolute right-0 z-50 mt-1 max-h-80 w-72 overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+        <ul className="absolute left-0 z-50 mt-1.5 w-72 animate-fadeIn overflow-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-popover">
+          <li className="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+            Contexts
+          </li>
           {contexts.map((c) => {
-            const badge = healthBadge(healthByName.get(c.name), healthPending);
+            const { tone, label: badgeLabel, title } = healthTone(healthByName.get(c.name), healthPending);
             return (
               <li key={c.name}>
                 <button
                   type="button"
                   className={cn(
-                    "flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground",
+                    "flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted",
                     c.active && "font-medium",
                   )}
-                  title={badge.title}
+                  title={title}
                   aria-current={c.active ? "true" : undefined}
                   onClick={() => choose(c.name, c.active)}
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     <Check
-                      className={cn("h-4 w-4 shrink-0", c.active ? "opacity-100" : "opacity-0")}
+                      className={cn("h-3.5 w-3.5 shrink-0 text-primary", c.active ? "opacity-100" : "opacity-0")}
                     />
-                    <span className="truncate">{c.name}</span>
+                    <span className="truncate font-mono text-[12.5px]">{c.name}</span>
                   </span>
-                  <Badge variant={badge.variant} className="shrink-0">
-                    {badge.label}
-                  </Badge>
+                  <span
+                    className={cn(
+                      "shrink-0 rounded-sm px-1.5 py-0.5 text-xs font-medium",
+                      toneStyles[tone].pill,
+                    )}
+                  >
+                    {badgeLabel}
+                  </span>
                 </button>
               </li>
             );
           })}
           {canManage && (
             <>
-              <li role="separator" aria-hidden="true" className="my-1 h-px bg-border" />
+              <li role="separator" aria-hidden="true" className="mx-1 my-1 h-px bg-border" />
               <li>
                 <button
                   type="button"
-                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground"
                   onClick={() => {
                     setOpen(false);
                     setManageOpen(true);
                   }}
                 >
-                  <Settings className="h-4 w-4 shrink-0 opacity-70" />
+                  <Settings className="h-3.5 w-3.5 shrink-0 opacity-70" />
                   Manage kubeconfig sources
                 </button>
               </li>
@@ -134,7 +159,7 @@ export function ContextSwitcher() {
         </ul>
       )}
       {switchContext.isError && (
-        <p role="alert" className="absolute right-0 mt-1 w-72 rounded-md border border-destructive bg-background p-2 text-xs text-destructive shadow-md">
+        <p role="alert" className="absolute left-0 mt-1.5 w-72 rounded-md border border-destructive bg-background p-2 text-xs text-destructive shadow-popover">
           Switch failed: {switchError(switchContext.error)}
         </p>
       )}

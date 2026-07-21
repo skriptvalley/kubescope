@@ -1,88 +1,147 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, type Overview } from "@/lib/api";
+import { ApiError, type PodSummary } from "@/lib/api";
 
 import { OverviewPage } from "./overview";
 
-const overviewMock = vi.hoisted(() => vi.fn());
+const useOverviewMock = vi.hoisted(() => vi.fn());
+const usePodsMock = vi.hoisted(() => vi.fn());
+const useNodesMock = vi.hoisted(() => vi.fn());
+const useMetricsMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/api", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/lib/api")>();
-  return {
-    ...original,
-    api: { overview: overviewMock },
-  };
-});
+vi.mock("@/hooks/use-overview", () => ({ useOverview: useOverviewMock }));
+vi.mock("@/hooks/use-stream", () => ({ useLiveWorkloadSummary: usePodsMock }));
+vi.mock("@/hooks/use-nodes", () => ({ useNodes: useNodesMock }));
+vi.mock("@/hooks/use-metrics", () => ({ usePodMetrics: useMetricsMock }));
+
+const runningPod: PodSummary = {
+  name: "web-1",
+  namespace: "default",
+  ready: "1/1",
+  readyContainers: 1,
+  totalContainers: 1,
+  status: "Running",
+  phase: "Running",
+  restarts: 0,
+  node: "node-a",
+  creationTimestamp: "2026-07-20T00:00:00Z",
+};
+const failingPod: PodSummary = {
+  name: "payments-api-x",
+  namespace: "payments",
+  ready: "0/1",
+  readyContainers: 0,
+  totalContainers: 1,
+  status: "CrashLoopBackOff",
+  phase: "Running",
+  restarts: 17,
+  node: "node-b",
+  creationTimestamp: "2026-07-20T00:00:00Z",
+};
 
 function renderPage() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
   return render(
-    <QueryClientProvider client={queryClient}>
+    <MemoryRouter>
       <OverviewPage />
-    </QueryClientProvider>,
+    </MemoryRouter>,
   );
 }
 
+beforeEach(() => {
+  useOverviewMock.mockReset().mockReturnValue({
+    data: { context: "prod", serverVersion: "v1.33.0", nodeCount: 3, namespaces: ["default", "kube-system", "payments"] },
+    isError: false,
+    isFetching: false,
+    refetch: vi.fn(),
+  });
+  usePodsMock.mockReset().mockReturnValue({
+    data: [runningPod, failingPod],
+    isPending: false,
+    isError: false,
+    streamStatus: "live",
+    refetch: vi.fn(),
+    isFetching: false,
+  });
+  useNodesMock.mockReset().mockReturnValue({
+    data: [
+      { name: "node-a", status: "Ready", version: "v1.33.0", unschedulable: false },
+      { name: "node-b", status: "Ready", version: "v1.33.0", unschedulable: false },
+      { name: "node-c", status: "Ready", version: "v1.33.0", unschedulable: false },
+    ],
+    refetch: vi.fn(),
+  });
+  useMetricsMock.mockReset().mockReturnValue({
+    available: true,
+    byPod: new Map([["default/web-1", { name: "web-1", namespace: "default", cpu: "12m", memory: "96Mi" }]]),
+    query: { refetch: vi.fn() },
+  });
+});
+
 describe("OverviewPage", () => {
-  it("shows a loading skeleton while the query is pending", () => {
-    overviewMock.mockReturnValue(new Promise<Overview>(() => {}));
+  it("renders the title, context/version subtitle and stat cards", () => {
     renderPage();
-    expect(screen.getByTestId("overview-loading")).toBeInTheDocument();
+    expect(screen.getByText("Cluster overview")).toBeInTheDocument();
+    expect(screen.getByText("prod")).toBeInTheDocument();
+    expect(screen.getByText("v1.33.0")).toBeInTheDocument();
+    expect(screen.getByText("3 Ready")).toBeInTheDocument(); // Nodes stat
+    expect(screen.getByText("1 Running")).toBeInTheDocument(); // Pods stat
+    expect(screen.getByText("Degraded")).toBeInTheDocument(); // Health, one failing pod
   });
 
-  it("renders server version, node count and namespaces", async () => {
-    overviewMock.mockResolvedValue({
-      context: "prod",
-      serverVersion: "v1.33.0",
-      nodeCount: 3,
-      namespaces: ["default", "kube-system"],
-    } satisfies Overview);
+  it("shows the attention banner and live pod rows with merged metrics", () => {
     renderPage();
-
-    expect(await screen.findByText("v1.33.0")).toBeInTheDocument();
-    expect(screen.getByText("3")).toBeInTheDocument();
-    expect(screen.getByText("default")).toBeInTheDocument();
-    expect(screen.getByText("kube-system")).toBeInTheDocument();
-    expect(screen.getByText(/context prod/i)).toBeInTheDocument();
+    expect(screen.getByText(/workload failing/i)).toBeInTheDocument();
+    expect(screen.getByText("web-1")).toBeInTheDocument();
+    expect(screen.getAllByText("payments-api-x").length).toBeGreaterThan(0); // banner + row
+    expect(screen.getAllByText("CrashLoopBackOff").length).toBeGreaterThan(0); // banner + status badge
+    // metrics-server usage merged into the CPU/Memory columns.
+    expect(screen.getByText("12m")).toBeInTheDocument();
+    expect(screen.getByText("96Mi")).toBeInTheDocument();
   });
 
-  it("renders a clear error state when the cluster is unreachable", async () => {
-    overviewMock.mockRejectedValue(
-      new ApiError("listing nodes: connection refused", "cluster_unreachable", 502),
-    );
+  it("shows a loading skeleton while the pods query is pending", () => {
+    usePodsMock.mockReturnValue({
+      data: undefined,
+      isPending: true,
+      isError: false,
+      streamStatus: "connecting",
+      refetch: vi.fn(),
+      isFetching: true,
+    });
     renderPage();
-
-    expect(await screen.findByText(/cluster unreachable/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/connection refused \(cluster_unreachable\)/i),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("overview-pods-loading")).toBeInTheDocument();
   });
 
-  it("labels a kubeconfig error distinctly from an unreachable cluster", async () => {
-    overviewMock.mockRejectedValue(
-      new ApiError("no active context: current-context unset", "kubeconfig_unavailable", 503),
-    );
+  it("renders a clear error state when the cluster is unreachable", () => {
+    useOverviewMock.mockReturnValue({
+      data: undefined,
+      isError: true,
+      error: new ApiError("listing nodes: connection refused", "cluster_unreachable", 502),
+      isFetching: false,
+      refetch: vi.fn(),
+    });
     renderPage();
-
-    expect(await screen.findByText(/kubeconfig unavailable/i)).toBeInTheDocument();
-    expect(screen.queryByText(/cluster unreachable/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/cluster unreachable/i)).toBeInTheDocument();
+    expect(screen.getByText(/connection refused \(cluster_unreachable\)/i)).toBeInTheDocument();
   });
 
-  it("shows ADR-0004 guidance when the error carries it", async () => {
-    overviewMock.mockRejectedValue(
-      new ApiError(
-        "fetching server version: exec: aws not found",
-        "cluster_unreachable",
-        502,
+  it("distinguishes a kubeconfig error and surfaces ADR-0004 guidance", () => {
+    useOverviewMock.mockReturnValue({
+      data: undefined,
+      isError: true,
+      error: new ApiError(
+        "no active context",
+        "kubeconfig_unavailable",
+        503,
         "mount ~/.aws or pre-generate a token — see ADR-0004",
       ),
-    );
+      isFetching: false,
+      refetch: vi.fn(),
+    });
     renderPage();
-
-    expect(await screen.findByText(/ADR-0004/i)).toBeInTheDocument();
+    expect(screen.getByText(/kubeconfig unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/ADR-0004/i)).toBeInTheDocument();
   });
 });

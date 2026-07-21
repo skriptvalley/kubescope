@@ -1,21 +1,22 @@
 import { cn } from "@/lib/utils";
 import type { StreamStatus } from "@/lib/stream";
 
+// Dusk tones: live→brand, connecting→highlight, stale→destructive.
 const config: Record<StreamStatus, { label: string; dot: string; text: string }> = {
   live: {
     label: "Live",
-    dot: "bg-emerald-500",
-    text: "text-emerald-700 dark:text-emerald-300",
+    dot: "bg-brand",
+    text: "text-badge-brand-fg",
   },
   connecting: {
     label: "Connecting…",
-    dot: "bg-amber-500 animate-pulse",
-    text: "text-amber-700 dark:text-amber-300",
+    dot: "bg-highlight animate-pulse",
+    text: "text-badge-hl-fg",
   },
   stale: {
     label: "Reconnecting…",
-    dot: "bg-red-500",
-    text: "text-red-700 dark:text-red-300",
+    dot: "bg-destructive",
+    text: "text-destructive",
   },
 };
 
@@ -30,7 +31,7 @@ export function LiveBadge({ status, className }: { status: StreamStatus; classNa
       aria-label={`Live updates: ${label}`}
       title={status === "live" ? "Receiving live updates" : "Live updates unavailable — polling for changes"}
     >
-      <span className={cn("h-2 w-2 rounded-full", dot)} aria-hidden="true" />
+      <span className={cn("h-[7px] w-[7px] rounded-full", dot)} aria-hidden="true" />
       {label}
     </span>
   );

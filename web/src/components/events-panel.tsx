@@ -24,7 +24,7 @@ export function EventsPanel({
 
   return (
     <section className="space-y-2" aria-label="Events">
-      <h3 className="text-sm font-semibold">Events</h3>
+      <h3 className="font-display text-sm font-medium">Events</h3>
       {isPending ? (
         <Skeleton className="h-16 w-full" data-testid="events-loading" />
       ) : isError ? (
@@ -38,7 +38,10 @@ export function EventsPanel({
       ) : data.length === 0 ? (
         <p className="text-sm text-muted-foreground">No events recorded for this object.</p>
       ) : (
-        <ul className="divide-y rounded-md border" data-testid="events-list">
+        <ul
+          className="divide-y overflow-hidden rounded-lg bg-card shadow-ring"
+          data-testid="events-list"
+        >
           {data.map((event, i) => (
             <EventRow key={`${event.reason}-${event.lastSeen ?? ""}-${i}`} event={event} />
           ))}
@@ -49,19 +52,28 @@ export function EventsPanel({
 }
 
 function EventRow({ event }: { event: EventSummary }) {
+  const warning = event.type === "Warning";
   return (
-    <li className="flex items-start gap-3 px-3 py-2 text-sm">
-      <StatusBadge tone={eventTypeTone(event.type)}>{event.type}</StatusBadge>
+    <li className="flex items-start gap-2.5 px-3 py-2 text-[13px]">
+      {warning ? (
+        <StatusBadge tone={eventTypeTone(event.type)} className="mt-px">
+          {event.type}
+        </StatusBadge>
+      ) : (
+        <span className="mt-px shrink-0 rounded-sm border px-1.5 py-0.5 text-[11.5px] font-medium text-muted-foreground">
+          {event.type}
+        </span>
+      )}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="font-medium">{event.reason}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[12.5px] font-medium">{event.reason}</span>
           {event.count > 1 && (
-            <span className="text-xs text-muted-foreground">×{event.count}</span>
+            <span className="font-mono text-[11px] text-muted-foreground">×{event.count}</span>
           )}
         </div>
-        <p className="break-words text-muted-foreground">{event.message}</p>
+        <p className="break-words text-[12.5px] leading-snug text-muted-foreground">{event.message}</p>
       </div>
-      <span className="shrink-0 text-xs text-muted-foreground" title={event.lastSeen}>
+      <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground" title={event.lastSeen}>
         {formatAge(event.lastSeen)}
       </span>
     </li>

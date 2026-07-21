@@ -67,17 +67,22 @@ describe("PodDetail", () => {
     expect(screen.getByText("10.0.0.5")).toBeInTheDocument();
     expect(screen.getByText("Burstable")).toBeInTheDocument();
 
-    // App container: waiting reason surfaced, restarts shown.
+    // App container: waiting reason surfaced, restart count shown in the cell.
     expect(screen.getByText("CrashLoopBackOff")).toBeInTheDocument();
-    expect(screen.getByText("restarts: 4")).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument();
     // Init container: terminated reason surfaced.
     expect(screen.getByText("Completed")).toBeInTheDocument();
   });
 
-  it("groups init and app containers separately", () => {
+  it("lists init and app containers in one table, tagging init containers", () => {
     renderPod();
-    expect(screen.getByTestId("containers-init-containers")).toBeInTheDocument();
-    expect(screen.getByTestId("containers-containers")).toBeInTheDocument();
+    const containers = screen.getByTestId("containers");
+    // Both containers appear in the combined table.
+    expect(containers).toHaveTextContent("init");
+    expect(containers).toHaveTextContent("app");
+    // The init container carries its kind tag.
+    expect(containers).toHaveTextContent("Completed");
+    expect(containers).toHaveTextContent("CrashLoopBackOff");
   });
 
   it("links the controlling owner to its detail route", () => {

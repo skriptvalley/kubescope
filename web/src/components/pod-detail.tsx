@@ -1,11 +1,22 @@
 import { Link } from "react-router-dom";
 
+import { DetailField, DetailGrid, DetailSection } from "@/components/detail-ui";
 import { EventsPanel } from "@/components/events-panel";
 import { PortForwardControls } from "@/components/port-forward-controls";
 import { StatusBadge } from "@/components/status-badge";
-import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useReadOnly } from "@/hooks/use-config";
+import { formatAge } from "@/lib/age";
 import type { KubeObject } from "@/lib/api";
+import { restartClass } from "@/lib/tone-style";
+import { cn } from "@/lib/utils";
 import { routeForKind } from "@/lib/workloads";
 import { podStatusTone, type StatusTone } from "@/lib/workload-status";
 
@@ -43,6 +54,7 @@ interface SpecContainer {
 }
 interface PodObject {
   metadata?: {
+    creationTimestamp?: string;
     ownerReferences?: { kind?: string; name?: string }[];
   };
   spec?: {
@@ -59,6 +71,12 @@ interface PodObject {
     initContainerStatuses?: ContainerStatus[];
     ephemeralContainerStatuses?: ContainerStatus[];
   };
+}
+
+interface ContainerRow {
+  status: ContainerStatus;
+  kind: "" | "init" | "ephemeral";
+  imageFallback?: string;
 }
 
 /** Dedicated Pod detail: placement, conditions and a per-container breakdown,
@@ -82,52 +100,117 @@ export function PodDetail({
       ? routeForKind(owner.kind, namespace, owner.name)
       : undefined;
 
+  const specImages = new Map(
+    [...(spec.initContainers ?? []), ...(spec.containers ?? [])].map((c) => [c.name, c.image]),
+  );
+  const rows: ContainerRow[] = [
+    ...(status.initContainerStatuses ?? []).map((s) => ({ status: s, kind: "init" as const, imageFallback: specImages.get(s.name) })),
+    ...(status.containerStatuses ?? []).map((s) => ({ status: s, kind: "" as const, imageFallback: specImages.get(s.name) })),
+    ...(status.ephemeralContainerStatuses ?? []).map((s) => ({ status: s, kind: "ephemeral" as const, imageFallback: specImages.get(s.name) })),
+  ];
+
   return (
-    <div className="space-y-6">
-      <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Field label="Phase" value={status.phase ?? "—"} />
-        <Field label="Node" value={spec.nodeName ?? "—"} />
-        <Field label="Pod IP" value={status.podIP ?? "—"} />
-        <Field label="QoS class" value={status.qosClass ?? "—"} />
-        <div>
-          <dt className="text-xs text-muted-foreground">Controlled by</dt>
-          <dd className="mt-0.5 break-all text-sm font-medium">
-            {owner ? (
-              ownerRoute ? (
-                <Link to={ownerRoute} className="underline-offset-4 hover:underline">
-                  {owner.kind}/{owner.name}
-                </Link>
-              ) : (
-                `${owner.kind}/${owner.name}`
-              )
+    <div className="flex flex-col gap-[18px]">
+      <DetailGrid>
+        <DetailField label="Phase" value={status.phase ?? "—"} />
+        <DetailField label="Node">
+          <span className="font-mono">{spec.nodeName ?? "—"}</span>
+        </DetailField>
+        <DetailField label="Pod IP">
+          <span className="font-mono">{status.podIP ?? "—"}</span>
+        </DetailField>
+        <DetailField label="QoS class" value={status.qosClass ?? "—"} />
+        <DetailField label="Controlled by">
+          {owner ? (
+            ownerRoute ? (
+              <Link to={ownerRoute} className="font-mono text-primary hover:underline">
+                {owner.kind}/{owner.name}
+              </Link>
             ) : (
-              "—"
-            )}
-          </dd>
-        </div>
-      </dl>
+              <span className="font-mono">
+                {owner.kind}/{owner.name}
+              </span>
+            )
+          ) : (
+            "—"
+          )}
+        </DetailField>
+        <DetailField label="Age">
+          <span className="font-mono">{formatAge(pod.metadata?.creationTimestamp)}</span>
+        </DetailField>
+      </DetailGrid>
 
-      <ContainerGroup title="Init containers" statuses={status.initContainerStatuses} specs={spec.initContainers} />
-      <ContainerGroup title="Containers" statuses={status.containerStatuses} specs={spec.containers} />
-      <ContainerGroup title="Ephemeral containers" statuses={status.ephemeralContainerStatuses} specs={[]} hideWhenEmpty />
+      <DetailSection title="Containers">
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">None</p>
+        ) : (
+          <div className="overflow-hidden rounded-lg bg-card shadow-ring">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Container</TableHead>
+                  <TableHead>State</TableHead>
+                  <TableHead>Ready</TableHead>
+                  <TableHead className="text-right">Restarts</TableHead>
+                  <TableHead>Image</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody data-testid="containers">
+                {rows.map((row) => {
+                  const cs = row.status;
+                  const state = containerStateLabel(cs.state);
+                  const restarts = cs.restartCount ?? 0;
+                  return (
+                    <TableRow key={`${row.kind}-${cs.name}`} className="hover:bg-transparent">
+                      <TableCell>
+                        <span className="font-mono text-xs font-medium">{cs.name}</span>
+                        {row.kind && (
+                          <span className="ml-1.5 text-[11px] text-muted-foreground">{row.kind}</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge tone={state.tone} dot>
+                          {state.label}
+                        </StatusBadge>
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={cn(
+                            "inline-flex rounded-sm border px-1.5 py-px text-[11.5px]",
+                            cs.ready ? "text-foreground" : "text-muted-foreground",
+                          )}
+                        >
+                          {cs.ready ? "ready" : "not ready"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className={cn("font-mono text-xs", restartClass(restarts))}>{restarts}</span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="break-all font-mono text-[11.5px] text-muted-foreground">
+                          {cs.image ?? row.imageFallback ?? "—"}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </DetailSection>
 
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold">Conditions</h3>
+      <DetailSection title="Conditions">
         {(status.conditions ?? []).length === 0 ? (
           <p className="text-sm text-muted-foreground">None</p>
         ) : (
-          <ul className="space-y-1 text-sm" data-testid="pod-conditions">
+          <div className="flex flex-wrap gap-1.5" data-testid="pod-conditions">
             {status.conditions!.map((c) => (
-              <li key={c.type} className="flex items-center gap-2">
-                <Badge variant={c.status === "True" ? "secondary" : "outline"} className="font-normal">
-                  {c.type}={c.status}
-                </Badge>
-                {c.reason && <span className="text-muted-foreground">{c.reason}</span>}
-              </li>
+              <ConditionChip key={c.type} type={c.type} status={c.status} reason={c.reason} />
             ))}
-          </ul>
+          </div>
         )}
-      </section>
+      </DetailSection>
 
       {!readOnly && <PortForwardControls namespace={namespace ?? ""} pod={name} object={object} />}
 
@@ -136,57 +219,28 @@ export function PodDetail({
   );
 }
 
-function ContainerGroup({
-  title,
-  statuses,
-  specs,
-  hideWhenEmpty,
+/** A condition chip: True → secondary, False → destructive tint (reason in the
+ *  title), matching the Dusk conditions row. */
+function ConditionChip({
+  type,
+  status,
+  reason,
 }: {
-  title: string;
-  statuses?: ContainerStatus[];
-  specs?: SpecContainer[];
-  hideWhenEmpty?: boolean;
+  type?: string;
+  status?: string;
+  reason?: string;
 }) {
-  const list = statuses ?? [];
-  if (list.length === 0 && hideWhenEmpty) return null;
-  const imageForName = new Map((specs ?? []).map((c) => [c.name, c.image]));
-
+  const ok = status === "True";
   return (
-    <section className="space-y-2">
-      <h3 className="text-sm font-semibold">{title}</h3>
-      {list.length === 0 ? (
-        <p className="text-sm text-muted-foreground">None</p>
-      ) : (
-        <ul className="space-y-2" data-testid={`containers-${slug(title)}`}>
-          {list.map((cs) => {
-            const state = containerStateLabel(cs.state);
-            return (
-              <li key={cs.name} className="rounded-md border p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{cs.name}</span>
-                  <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
-                  {cs.ready ? (
-                    <Badge variant="outline" className="font-normal">
-                      ready
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="font-normal text-muted-foreground">
-                      not ready
-                    </Badge>
-                  )}
-                  <span className="text-xs text-muted-foreground">
-                    restarts: {cs.restartCount ?? 0}
-                  </span>
-                </div>
-                <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                  {cs.image ?? imageForName.get(cs.name) ?? "—"}
-                </p>
-              </li>
-            );
-          })}
-        </ul>
+    <span
+      title={reason || undefined}
+      className={cn(
+        "inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-medium",
+        ok ? "bg-secondary text-secondary-foreground" : "bg-destructive/10 text-destructive",
       )}
-    </section>
+    >
+      {type}={status}
+    </span>
   );
 }
 
@@ -201,20 +255,7 @@ function containerStateLabel(state?: ContainerState): { tone: StatusTone; label:
   if (state?.terminated) {
     const t = state.terminated;
     const reason = t.reason ?? (t.signal ? `Signal:${t.signal}` : `ExitCode:${t.exitCode ?? 0}`);
-    return { tone: reason === "Completed" ? "ok" : "warn", label: reason };
+    return { tone: reason === "Completed" ? "neutral" : "warn", label: reason };
   }
   return { tone: "progress", label: "Unknown" };
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 break-all text-sm font-medium">{value}</dd>
-    </div>
-  );
-}
-
-function slug(s: string): string {
-  return s.toLowerCase().replace(/\s+/g, "-");
 }

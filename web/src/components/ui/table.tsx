@@ -47,8 +47,9 @@ const TableHead = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <th
     ref={ref}
+    // Dusk: dense 32px header row, small muted labels.
     className={cn(
-      "h-10 px-2 text-left align-middle font-medium text-muted-foreground",
+      "h-8 whitespace-nowrap px-3 text-left align-middle text-xs font-medium text-muted-foreground",
       className,
     )}
     {...props}
@@ -60,7 +61,8 @@ const TableCell = React.forwardRef<
   HTMLTableCellElement,
   React.TdHTMLAttributes<HTMLTableCellElement>
 >(({ className, ...props }, ref) => (
-  <td ref={ref} className={cn("p-2 align-middle", className)} {...props} />
+  // Dusk: 7px vertical row padding, 12px horizontal.
+  <td ref={ref} className={cn("px-3 py-[7px] align-middle", className)} {...props} />
 ));
 TableCell.displayName = "TableCell";
 

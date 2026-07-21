@@ -4,6 +4,7 @@
 // the detail page's dispatch.
 
 export type DetailKind =
+  | "namespace"
   | "configmap"
   | "secret"
   | "service"
@@ -20,6 +21,7 @@ export type DetailKind =
 /** Keyed by `${groupToken}/${resource}` — group is the URL token ("core" for the
  *  core group), resource the plural. Version-insensitive by construction. */
 const REGISTRY: Record<string, DetailKind> = {
+  "core/namespaces": "namespace",
   "core/configmaps": "configmap",
   "core/secrets": "secret",
   "core/services": "service",

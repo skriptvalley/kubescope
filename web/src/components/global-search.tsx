@@ -104,9 +104,9 @@ export function GlobalSearch() {
   const showDropdown = open && debounced.trim().length >= MIN_SEARCH_LENGTH;
 
   return (
-    <div ref={containerRef} className="relative w-full max-w-md">
+    <div ref={containerRef} className="relative w-full min-w-[120px] max-w-[360px]">
       <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
           ref={inputRef}
           type="text"
@@ -114,7 +114,7 @@ export function GlobalSearch() {
           aria-expanded={showDropdown}
           aria-controls="global-search-results"
           aria-label="Search resources"
-          placeholder="Search resources…  (press /)"
+          placeholder="Search resources…"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -122,18 +122,23 @@ export function GlobalSearch() {
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
-          className="pl-8"
+          className="h-8 pl-8 pr-9 text-[13px]"
         />
+        {!query && (
+          <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border bg-muted px-1.5 py-px font-mono text-[11px] text-muted-foreground">
+            /
+          </kbd>
+        )}
       </div>
 
       {showDropdown && (
         <div
           id="global-search-results"
           role="listbox"
-          className="absolute z-20 mt-1 max-h-96 w-full overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
+          className="absolute z-40 mt-1.5 max-h-80 w-full animate-fadeIn overflow-y-auto rounded-lg border bg-popover p-1 shadow-popover"
         >
           {results.length === 0 ? (
-            <p className="px-2 py-3 text-sm text-muted-foreground">
+            <p className="px-2 py-2.5 text-[13px] text-muted-foreground">
               {isFetching ? "Searching…" : `No matches for “${debounced.trim()}”.`}
             </p>
           ) : (
@@ -147,12 +152,12 @@ export function GlobalSearch() {
                     onMouseEnter={() => setActive(i)}
                     onClick={() => go(r)}
                     className={cn(
-                      "flex w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left text-sm",
-                      i === active ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+                      "flex w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left text-[13px]",
+                      i === active ? "bg-muted" : "hover:bg-muted",
                     )}
                   >
-                    <span className="min-w-0 truncate font-medium">{r.name}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
+                    <span className="min-w-0 truncate font-mono text-xs font-medium">{r.name}</span>
+                    <span className="shrink-0 text-[11.5px] text-muted-foreground">
                       {r.kind}
                       {r.namespace ? ` · ${r.namespace}` : ""}
                     </span>

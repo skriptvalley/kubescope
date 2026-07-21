@@ -2,51 +2,94 @@
 @tailwind components;
 @tailwind utilities;
 
-/* shadcn/ui theme tokens (zinc). */
+/* skriptvalley "Dusk" design system (ADR-0009). Tokens are raw OKLCH: the
+ * palette is stored as space-separated L C H channels so Tailwind can inject an
+ * alpha via `oklch(var(--token) / <alpha-value>)` (preserving every opacity
+ * modifier); border/input/badge-fg/ring-soft are stored as full colors because
+ * they carry their own alpha or are computed. Light `:root` + dark `.dark`. */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 10% 3.9%;
-    --radius: 0.5rem;
+    /* channels (L C H) */
+    --background: 0.984 0.012 100;
+    --foreground: 0.255 0.045 300;
+    --card: 1 0 0;
+    --card-foreground: 0.255 0.045 300;
+    --popover: 1 0 0;
+    --popover-foreground: 0.255 0.045 300;
+    --primary: 0.470 0.135 300;
+    --primary-foreground: 0.990 0.010 100;
+    --secondary: 0.955 0.018 100;
+    --secondary-foreground: 0.320 0.050 300;
+    --muted: 0.955 0.018 100;
+    --muted-foreground: 0.520 0.025 95;
+    --accent: 0.945 0.024 100;
+    --accent-foreground: 0.320 0.050 300;
+    --destructive: 0.577 0.245 27.325;
+    --destructive-foreground: 0.990 0.010 100;
+    --ring: 0.470 0.135 300;
+    --brand: 0.704 0.118 178;
+    --brand-foreground: 0.270 0.045 178;
+    --highlight: 0.715 0.175 52;
+    --highlight-foreground: 0.300 0.080 52;
+    --chart-1: 0.470 0.135 300;
+    --chart-2: 0.715 0.175 52;
+    --chart-3: 0.704 0.118 178;
+    --sidebar: 0.975 0.015 100;
+    --sidebar-foreground: 0.255 0.045 300;
+    --sidebar-primary: 0.470 0.135 300;
+    --sidebar-accent: 0.945 0.024 100;
+    --sidebar-accent-foreground: 0.320 0.050 300;
+
+    /* full colors (carry alpha / computed) */
+    --border: oklch(0.910 0.020 98);
+    --input: oklch(0.910 0.020 98);
+    --sidebar-border: oklch(0.910 0.020 98);
+    /* light mode uses the darker *-foreground for legible text on a tint */
+    --badge-brand-fg: oklch(var(--brand-foreground));
+    --badge-hl-fg: oklch(var(--highlight-foreground));
+    --ring-soft: color-mix(in oklch, oklch(var(--foreground)) 10%, transparent);
+
+    --radius: 0.875rem; /* 14px — cards/panels/dialog (lg); md=10, sm=8 */
   }
 
   .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
+    --background: 0.165 0.022 305;
+    --foreground: 0.940 0.015 95;
+    --card: 0.215 0.026 305;
+    --card-foreground: 0.940 0.015 95;
+    --popover: 0.215 0.026 305;
+    --popover-foreground: 0.940 0.015 95;
+    --primary: 0.585 0.150 300;
+    --primary-foreground: 0.990 0.010 100;
+    --secondary: 0.270 0.028 305;
+    --secondary-foreground: 0.940 0.015 95;
+    --muted: 0.270 0.028 305;
+    --muted-foreground: 0.720 0.022 95;
+    --accent: 0.305 0.030 305;
+    --accent-foreground: 0.940 0.015 95;
+    --destructive: 0.704 0.191 22.216;
+    --destructive-foreground: 0.990 0.010 100;
+    --ring: 0.585 0.150 300;
+    --brand: 0.720 0.118 178;
+    --brand-foreground: 0.200 0.040 178;
+    --highlight: 0.740 0.165 55;
+    --highlight-foreground: 0.220 0.070 52;
+    --chart-1: 0.640 0.160 300;
+    --chart-2: 0.740 0.165 55;
+    --chart-3: 0.720 0.118 178;
+    --sidebar: 0.200 0.024 305;
+    --sidebar-foreground: 0.940 0.015 95;
+    --sidebar-primary: 0.585 0.150 300;
+    --sidebar-accent: 0.305 0.030 305;
+    --sidebar-accent-foreground: 0.940 0.015 95;
+
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 14%);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    /* dark mode uses the bright base for text on a tint */
+    --badge-brand-fg: oklch(var(--brand));
+    --badge-hl-fg: oklch(var(--highlight));
+    --ring-soft: color-mix(in oklch, oklch(1 0 0) 12%, transparent);
   }
 }
 
@@ -56,5 +99,10 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+    font-family: theme("fontFamily.sans");
+    font-size: 14px;
+  }
+  ::selection {
+    background-color: color-mix(in oklch, oklch(var(--primary)) 24%, transparent);
   }
 }
