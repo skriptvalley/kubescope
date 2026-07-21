@@ -36,6 +36,14 @@ const defaultProbeTimeout = 5 * time.Second
 // headroom than a single-call health probe.
 const discoveryTimeout = 15 * time.Second
 
+// clientQPS/clientBurst raise the per-context client rate limits above client-go's
+// throttling defaults (5 QPS / 10 burst), which are far too low for a dashboard
+// that fans many reads out in parallel (overview, sidebar counts, workload lists).
+const (
+	clientQPS   = 50
+	clientBurst = 100
+)
+
 // Manager expands and merges the kubeconfig source registry on demand, tracks
 // the active context in memory, and caches a successfully-built rest.Config +
 // clientset per context. Failures are not cached, and directory sources are
@@ -277,6 +285,13 @@ func (m *Manager) clientsFor(name string) (*cachedClient, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A dashboard issues many parallel reads at once — the overview, the per-type
+	// sidebar counts (ADR-0009), and several workload lists — so client-go's
+	// default 5 QPS / 10 burst throttles them into multi-second client-side waits.
+	// Raise the limits to dashboard-appropriate values; the apiserver (with its
+	// own priority-and-fairness) is the real limiter, not the client.
+	restCfg.QPS = clientQPS
+	restCfg.Burst = clientBurst
 	cs, err := kubernetes.NewForConfig(restCfg)
 	if err != nil {
 		return nil, fmt.Errorf("building clientset for context %q: %w", name, err)
