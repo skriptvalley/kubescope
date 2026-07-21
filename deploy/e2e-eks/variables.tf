@@ -25,6 +25,12 @@ variable "vpc_cidr" {
   default     = "10.42.0.0/16"
 }
 
+variable "cluster_endpoint_public_access_cidrs" {
+  description = "CIDRs allowed to reach the public EKS API endpoint. Defaults to the whole internet for convenience (IAM auth is still required); set to [\"<your-ip>/32\"] for a tighter posture."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
 variable "node_instance_type" {
   description = <<-EOT
     EC2 instance type for the managed node group. t3.micro is NOT viable — its

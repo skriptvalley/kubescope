@@ -44,7 +44,8 @@ module "eks" {
 
   # Public endpoint: the host mints a token-kubeconfig pointing here and mounts
   # it into the container, which reaches the API server over the internet.
-  cluster_endpoint_public_access = true
+  cluster_endpoint_public_access       = true
+  cluster_endpoint_public_access_cidrs = var.cluster_endpoint_public_access_cidrs
 
   # Grant the identity running Terraform cluster-admin via an EKS access entry,
   # so `aws eks get-token` (the kubeconfig helper) and kubectl work immediately.

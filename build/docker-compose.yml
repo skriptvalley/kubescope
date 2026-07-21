@@ -19,6 +19,12 @@ services:
   kubescope:
     image: ${KUBESCOPE_IMAGE:-ghcr.io/skriptvalley/kubescope:latest}
     container_name: kubescope-e2e
+    # The image runs as nonroot (uid 65532). On Linux, bind mounts keep host
+    # ownership, so the container user must match the host owner of the 0600
+    # kubeconfig to read it — `make compose-up` sets KUBESCOPE_COMPOSE_USER to
+    # the host uid:gid there (mirroring `testenv.sh run --docker`). On
+    # macOS/Windows Docker Desktop remaps ownership, so the image default is kept.
+    user: "${KUBESCOPE_COMPOSE_USER:-65532:65532}"
     # Read-only mount of the prepared kubeconfig (ADR-0004). The prep step writes
     # build/.e2e-kubeconfig; override the source with KUBESCOPE_COMPOSE_KUBECONFIG.
     volumes:

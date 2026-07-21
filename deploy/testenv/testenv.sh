@@ -248,6 +248,9 @@ run_docker() {
 compose_config() {
   cluster_exists "$DEV_CLUSTER" || die "no test environment — run '$0 up' first."
   local dst="$REPO_ROOT/build/.e2e-kubeconfig"
+  # The copy carries the kind admin cert/key — create it 0600 from the start
+  # (not just at the final chmod), so it is never briefly world-readable.
+  umask 077
   cp "$KUBECONFIG_FILE" "$dst"
   case "$(uname -s)" in
     Darwin|MINGW*|MSYS*)

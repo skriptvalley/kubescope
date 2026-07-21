@@ -15,7 +15,7 @@ GO_PKG_DIRS       = $(shell go list -f '{{.Dir}}' ./...)
         e2e-eks-up e2e-eks-kubeconfig e2e-eks-down
 
 help: ## List targets
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-20s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-20s %s\n", $$1, $$2}'
 
 ## --- Development ---
 
@@ -102,7 +102,8 @@ compose-config: ## Prep the kind kubeconfig for docker-compose (writes build/.e2
 
 compose-up: ## Launch Kubescope via docker-compose (prep a kubeconfig first; build image: make docker-build-local)
 	@test -f build/.e2e-kubeconfig || { echo "no build/.e2e-kubeconfig — run 'make compose-config' (kind) or 'make e2e-eks-kubeconfig' (EKS) first"; exit 1; }
-	docker compose -f $(COMPOSE_FILE) up -d
+	@u=65532:65532; [ "$$(uname -s)" = Linux ] && u="$$(id -u):$$(id -g)"; \
+		KUBESCOPE_COMPOSE_USER="$$u" docker compose -f $(COMPOSE_FILE) up -d
 	@echo "Kubescope: http://127.0.0.1:8080  (logs: docker compose -f $(COMPOSE_FILE) logs -f  |  stop: make compose-down)"
 
 compose-down: ## Stop the docker-compose stack and remove the adapted kubeconfig copy

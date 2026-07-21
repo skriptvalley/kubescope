@@ -76,8 +76,10 @@ the aws-node/kube-proxy/CoreDNS system pods. `t3.small`/`t3.medium` is the floor
 All AWS specifics are variables with cheap defaults (see
 [`variables.tf`](variables.tf)) — `region` (default `ap-south-1`),
 `cluster_name`, `cluster_version`, `node_instance_type`, `node_desired_size`,
-`node_min_size`, `node_max_size`. Override with a gitignored `terraform.tfvars`
-or `-var` flags, e.g.:
+`node_min_size`, `node_max_size`, and `cluster_endpoint_public_access_cidrs`
+(defaults to `0.0.0.0/0` — IAM auth is still required; set to `["<your-ip>/32"]`
+to lock the API endpoint to your address). Override with a gitignored
+`terraform.tfvars` or `-var` flags, e.g.:
 
 ```sh
 cd deploy/e2e-eks && terraform apply -var region=us-east-1 -var node_instance_type=t3.small
