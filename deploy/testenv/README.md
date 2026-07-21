@@ -64,6 +64,37 @@ The credentials copy lives **only** in a `mktemp -d` directory removed by an
 `EXIT` trap; the docker path deliberately does not `exec`, so the trap still
 fires after the container stops.
 
+## Launching with docker-compose
+
+[`build/docker-compose.yml`](../../build/docker-compose.yml) is the declarative
+equivalent of `run --docker` — one `kubescope` service, canonical `KUBESCOPE_*`
+env, a read-only kubeconfig mount, and a **loopback-only** `127.0.0.1:8080`
+publish (ADR-0005). It mounts a container-ready kubeconfig from one fixed path
+(`build/.e2e-kubeconfig`) and does **no** per-OS rewriting itself — a prep step
+writes that file first.
+
+**kind flow** (macOS/Windows):
+
+```sh
+make testenv-up            # clusters + seeded workloads
+make compose-config        # write the host.docker.internal-adapted kubeconfig → build/.e2e-kubeconfig
+make docker-build-local    # build the image locally (GHCR is private today — FB-10)
+make compose-up            # dashboard on http://127.0.0.1:8080
+make compose-down          # stop + remove the adapted kubeconfig copy
+```
+
+> On **Linux**, a bridged compose can't reach a kind apiserver bound to
+> `127.0.0.1` — use `make testenv-run-docker` (host networking) for kind there.
+> The compose path targets kind on macOS/Windows and EKS on any OS.
+
+**EKS flow** (opt-in, **costs money**): provision a real cluster, mint a static
+token-kubeconfig into the same `build/.e2e-kubeconfig`, and launch the same
+compose — see [`deploy/e2e-eks/README.md`](../e2e-eks/README.md) and
+[ADR-0010](../../docs/adr/0010-e2e-eks-static-token-kubeconfig.md). The
+distroless image has no `aws` CLI, so EKS exec-auth can't run in-container; the
+token is minted host-side and mounted read-only. **Teardown is mandatory** —
+`make e2e-eks-down`.
+
 ## What gets created
 
 | Context | Contents |
@@ -74,7 +105,10 @@ fires after the container stops.
 **dev** covers all seven typed workload kinds plus config/networking:
 
 - **`web`** — `frontend` Deployment (3× nginx) + Service, `api` Deployment
-  (2× busybox, logs every 2s), `frontend-config` ConfigMap, `api-credentials` Secret
+  (2× busybox, logs every 2s) that consumes `frontend-config` + `api-credentials`
+  via **both env (`envFrom`) and volume mounts**, those `frontend-config`
+  ConfigMap + `api-credentials` Secret, and a `config-sync` Job that references
+  `api-credentials`
 - **`data`** — `postgres` StatefulSet (2×) + headless Service, `log-agent` DaemonSet
 - **`batch`** — `db-migrate` Job (completes), `hourly-report` CronJob (**every
   minute**), `crasher` Pod (**CrashLoopBackOff** → Warning events + previous logs)
@@ -92,6 +126,13 @@ churning live, so live updates are visible without doing anything.
 - **Events feed** — sidebar **Events**, filter by **Warning**.
 - **Context switch** — flip to `kind-kubescope-prod` and watch every view
   repopulate.
+- **Service endpoints** *(FB-13 fixture)* — the `web/frontend` Service resolves
+  to **3 ready endpoint pods**; the service-level port-forward round-robins each
+  new TCP connection across them (per-connection, kube-proxy semantics).
+- **Resource-graph edges** *(FB-14 fixture)* — `web/api` references the
+  ConfigMap + Secret via env **and** volume, and `web/config-sync` references the
+  Secret, so the graph has real Pod→ConfigMap/Secret and Job→Secret edges;
+  `batch/hourly-report` (every minute) is a CronJob→Jobs→pods run series to club.
 
 To run kubectl yourself: `export KUBECONFIG=deploy/testenv/kubeconfig`.
 

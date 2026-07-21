@@ -4,12 +4,15 @@ IMAGE            ?= ghcr.io/skriptvalley/kubescope:latest
 PLATFORMS        ?= linux/amd64,linux/arm64
 BUILDER          ?= kubescope-builder
 KIND_CLUSTER     ?= kubescope
+COMPOSE_FILE     ?= build/docker-compose.yml
 ENVTEST_K8S_VERSION ?= 1.36.x
 GO_PKG_DIRS       = $(shell go list -f '{{.Dir}}' ./...)
 
 .PHONY: dev dev-backend build test lint docker-build docker-build-local docker-run \
         fe-dev fe-build fe-test kind-up kind-down smoke help \
-        testenv-up testenv-down testenv-status testenv-run testenv-run-docker
+        testenv-up testenv-down testenv-status testenv-run testenv-run-docker \
+        compose-config compose-up compose-down \
+        e2e-eks-up e2e-eks-kubeconfig e2e-eks-down
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-20s %s\n", $$1, $$2}'
@@ -91,3 +94,26 @@ testenv-run: ## Build (if needed) and run kubescope (native) against the test en
 
 testenv-run-docker: ## Run the kubescope container image against the test environment
 	deploy/testenv/testenv.sh run --docker
+
+## --- e2e harness: docker-compose (kind default) + opt-in EKS (FB-12) ---
+
+compose-config: ## Prep the kind kubeconfig for docker-compose (writes build/.e2e-kubeconfig)
+	deploy/testenv/testenv.sh compose-config
+
+compose-up: ## Launch Kubescope via docker-compose (prep a kubeconfig first; build image: make docker-build-local)
+	@test -f build/.e2e-kubeconfig || { echo "no build/.e2e-kubeconfig — run 'make compose-config' (kind) or 'make e2e-eks-kubeconfig' (EKS) first"; exit 1; }
+	docker compose -f $(COMPOSE_FILE) up -d
+	@echo "Kubescope: http://127.0.0.1:8080  (logs: docker compose -f $(COMPOSE_FILE) logs -f  |  stop: make compose-down)"
+
+compose-down: ## Stop the docker-compose stack and remove the adapted kubeconfig copy
+	docker compose -f $(COMPOSE_FILE) down
+	@rm -f build/.e2e-kubeconfig
+
+e2e-eks-up: ## [BILLED — teardown mandatory] Provision the opt-in EKS cluster + seed fixtures (ADR-0010)
+	cd deploy/e2e-eks && terraform init -input=false && terraform apply
+
+e2e-eks-kubeconfig: ## Mint a static token-kubeconfig for the EKS cluster (compose mounts it; ~15-min TTL)
+	deploy/e2e-eks/kubeconfig.sh
+
+e2e-eks-down: ## Destroy the EKS cluster (terraform destroy) — run this when finished to stop billing
+	cd deploy/e2e-eks && terraform destroy

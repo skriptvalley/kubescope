@@ -1,0 +1,4 @@
+# Container-ready kubeconfig written by the compose prep step
+# (make compose-config / make e2e-eks-kubeconfig). Holds cluster credentials —
+# never commit it. Removed by `make compose-down`.
+.e2e-kubeconfig
