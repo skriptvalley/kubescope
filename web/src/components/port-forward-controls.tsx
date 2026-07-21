@@ -54,20 +54,20 @@ export function PortForwardControls({
 
   return (
     <section className="space-y-2" aria-label="Port forwarding">
-      <h3 className="text-sm font-semibold">Port forwarding</h3>
-      <form className="flex flex-wrap items-end gap-3" onSubmit={submit}>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-muted-foreground">Pod port</span>
+      <h3 className="font-display text-sm font-medium">Port forwarding</h3>
+      <form className="flex flex-wrap items-end gap-2.5" onSubmit={submit}>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11.5px] font-medium text-muted-foreground">Pod port</span>
           <input
             type="number"
             min={1}
             max={65535}
             list="pod-declared-ports"
-            className="w-28 rounded-md border bg-background px-2 py-1 text-sm"
+            className="h-8 w-[104px] rounded-md border border-input bg-transparent px-2.5 font-mono text-[12.5px] outline-none transition-[box-shadow,border-color] focus:border-ring focus:ring-[3px] focus:ring-ring/40"
             value={remotePort}
             onChange={(e) => setRemotePort(e.target.value)}
             aria-label="Pod port"
-            placeholder="e.g. 80"
+            placeholder="e.g. 8080"
           />
           {ports.length > 0 && (
             <datalist id="pod-declared-ports">
@@ -78,13 +78,13 @@ export function PortForwardControls({
           )}
         </label>
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs text-muted-foreground">Local port</span>
+        <label className="flex flex-col gap-1">
+          <span className="text-[11.5px] font-medium text-muted-foreground">Local port</span>
           <input
             type="number"
             min={0}
             max={65535}
-            className="w-28 rounded-md border bg-background px-2 py-1 text-sm"
+            className="h-8 w-[104px] rounded-md border border-input bg-transparent px-2.5 font-mono text-[12.5px] outline-none transition-[box-shadow,border-color] focus:border-ring focus:ring-[3px] focus:ring-ring/40"
             value={localPort}
             onChange={(e) => setLocalPort(e.target.value)}
             aria-label="Local port"
@@ -95,11 +95,14 @@ export function PortForwardControls({
         <Button type="submit" size="sm" disabled={!validRemote || start.isPending}>
           {start.isPending ? "Starting…" : "Forward"}
         </Button>
+
+        {ports.length > 0 && (
+          <span className="pb-1.5 text-[11.5px] text-muted-foreground">
+            Declared ports: <span className="font-mono">{ports.join(", ")}</span>
+          </span>
+        )}
       </form>
 
-      {ports.length > 0 && (
-        <p className="text-xs text-muted-foreground">Declared ports: {ports.join(", ")}</p>
-      )}
       {start.isError && (
         <p className="text-sm text-destructive" role="alert">
           {forwardErrorText(start.error)}

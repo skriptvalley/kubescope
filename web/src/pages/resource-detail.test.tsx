@@ -65,7 +65,7 @@ describe("ResourceDetailPage", () => {
     // Wait for the object body to load (the title renders from the route param
     // immediately, so key on a field that only appears once metadata arrives).
     expect(await screen.findByText("app=web")).toBeInTheDocument();
-    expect(screen.getByText("app-config")).toBeInTheDocument(); // title
+    expect(screen.getByRole("heading", { name: "app-config" })).toBeInTheDocument(); // title
     expect(screen.getAllByText(/Widget/).length).toBeGreaterThan(0);
     expect(screen.getByText("kubescope.io/note")).toBeInTheDocument();
     expect(screen.getByText("CustomResource/owner-abc")).toBeInTheDocument();

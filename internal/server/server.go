@@ -125,7 +125,15 @@ func New(opts Options) http.Handler {
 			v1.Get("/contexts/health", resources.HealthHandler(opts.Kube, opts.Logger, onHealth))
 			v1.Get("/overview", resources.OverviewHandler(opts.Kube, opts.Logger))
 			v1.Get("/namespaces", resources.NamespacesHandler(opts.Kube, opts.Logger))
+			// Namespace ResourceQuota bars (ADR-0009); an empty list is a normal 200.
+			v1.Get("/namespaces/{namespace}/quotas", resources.NamespaceQuotasHandler(opts.Kube, opts.Logger))
 			v1.Get("/discovery", resources.DiscoveryHandler(disco, opts.Kube, opts.Logger))
+			// Per-type sidebar counts (ADR-0009): best-effort, shares the discovery
+			// cache so it counts exactly the resources the nav shows.
+			v1.Get("/counts", resources.CountsHandler(disco, opts.Kube, opts.Logger))
+			// Pod CPU/Memory from metrics-server via the dynamic client (ADR-0009);
+			// reports Available:false (not an error) when metrics-server is absent.
+			v1.Get("/metrics/pods", resources.PodMetricsHandler(opts.Kube, opts.Logger))
 			// Server posture the UI reflects (read-only, auth mode). Touches no
 			// cluster, so it answers even when no cluster is reachable (ADR-0005).
 			v1.Get("/config", resources.ConfigHandler(

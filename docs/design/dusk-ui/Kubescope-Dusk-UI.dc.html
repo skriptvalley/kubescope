@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com"></link>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous"></link>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet"></link>
+<style>
+:root{
+--background:oklch(0.984 0.012 100);--foreground:oklch(0.255 0.045 300);
+--card:oklch(1 0 0);--card-foreground:oklch(0.255 0.045 300);
+--popover:oklch(1 0 0);--popover-foreground:oklch(0.255 0.045 300);
+--primary:oklch(0.470 0.135 300);--primary-foreground:oklch(0.990 0.010 100);
+--secondary:oklch(0.955 0.018 100);--secondary-foreground:oklch(0.320 0.050 300);
+--muted:oklch(0.955 0.018 100);--muted-foreground:oklch(0.520 0.025 95);
+--accent:oklch(0.945 0.024 100);--accent-foreground:oklch(0.320 0.050 300);
+--destructive:oklch(0.577 0.245 27.325);
+--border:oklch(0.910 0.020 98);--input:oklch(0.910 0.020 98);--ring:oklch(0.470 0.135 300);
+--brand:oklch(0.704 0.118 178);--brand-foreground:oklch(0.270 0.045 178);
+--highlight:oklch(0.715 0.175 52);--highlight-foreground:oklch(0.300 0.080 52);
+--chart-1:oklch(0.470 0.135 300);--chart-2:oklch(0.715 0.175 52);--chart-3:oklch(0.704 0.118 178);
+--sidebar:oklch(0.975 0.015 100);--sidebar-foreground:oklch(0.255 0.045 300);
+--sidebar-primary:oklch(0.470 0.135 300);--sidebar-accent:oklch(0.945 0.024 100);
+--sidebar-accent-foreground:oklch(0.320 0.050 300);--sidebar-border:oklch(0.910 0.020 98);
+--badge-brand-fg:var(--brand-foreground);--badge-hl-fg:var(--highlight-foreground);
+--ring-soft:color-mix(in oklch, var(--foreground) 10%, transparent);
+}
+.dark{
+--background:oklch(0.165 0.022 305);--foreground:oklch(0.940 0.015 95);
+--card:oklch(0.215 0.026 305);--card-foreground:oklch(0.940 0.015 95);
+--popover:oklch(0.215 0.026 305);--popover-foreground:oklch(0.940 0.015 95);
+--primary:oklch(0.585 0.150 300);--primary-foreground:oklch(0.990 0.010 100);
+--secondary:oklch(0.270 0.028 305);--secondary-foreground:oklch(0.940 0.015 95);
+--muted:oklch(0.270 0.028 305);--muted-foreground:oklch(0.720 0.022 95);
+--accent:oklch(0.305 0.030 305);--accent-foreground:oklch(0.940 0.015 95);
+--destructive:oklch(0.704 0.191 22.216);
+--border:oklch(1 0 0 / 10%);--input:oklch(1 0 0 / 14%);--ring:oklch(0.585 0.150 300);
+--brand:oklch(0.720 0.118 178);--brand-foreground:oklch(0.200 0.040 178);
+--highlight:oklch(0.740 0.165 55);--highlight-foreground:oklch(0.220 0.070 52);
+--chart-1:oklch(0.640 0.160 300);--chart-2:oklch(0.740 0.165 55);--chart-3:oklch(0.720 0.118 178);
+--sidebar:oklch(0.200 0.024 305);--sidebar-foreground:oklch(0.940 0.015 95);
+--sidebar-primary:oklch(0.585 0.150 300);--sidebar-accent:oklch(0.305 0.030 305);
+--sidebar-accent-foreground:oklch(0.940 0.015 95);--sidebar-border:oklch(1 0 0 / 10%);
+--badge-brand-fg:var(--brand);--badge-hl-fg:var(--highlight);
+--ring-soft:color-mix(in oklch, oklch(1 0 0) 12%, transparent);
+}
+html,body{margin:0;height:100%}
+body{background:var(--background);color:var(--foreground);font-family:'Geist',system-ui,-apple-system,sans-serif;font-size:14px;-webkit-font-smoothing:antialiased;transition:background 0.15s}
+a{color:var(--primary);text-decoration:none}
+a:hover{color:var(--primary);text-decoration:underline;text-underline-offset:4px}
+input,select,button{font-family:inherit}
+button{cursor:pointer}
+::selection{background-color:color-mix(in oklch, var(--primary) 24%, transparent)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{50%{opacity:0.4}}
+@keyframes dlgIn{from{opacity:0;transform:translate(-50%,-50%) scale(0.95)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+</style>
+</helmet>
+<div style="display:flex;flex-direction:column;height:100vh;background:var(--background);color:var(--foreground)" data-screen-label="Kubescope · Dusk">
+  <header style="flex-shrink:0;background:var(--card);border-bottom:1px solid var(--border)">
+    <div style="display:flex;height:52px;align-items:center;gap:12px;padding:0 16px">
+      <a href="#" onClick="{{ goOverview }}" style="display:flex;align-items:center;gap:10px;flex-shrink:0;text-decoration:none">
+        <img src="brand/wordmark.png" alt="Skript Valley" style="height:26px;width:auto;display:block"></img>
+        <span style="width:1px;height:20px;background:var(--border)"></span>
+        <span style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:15px;letter-spacing:-0.01em;color:var(--foreground)">Kubescope</span>
+      </a>
+      <div style="position:relative;flex-shrink:0">
+        <button onClick="{{ toggleCtx }}" aria-haspopup="true" aria-expanded="{{ ctxOpen }}" aria-label="Switch cluster context" style="display:inline-flex;height:32px;min-width:200px;align-items:center;justify-content:space-between;gap:6px;border-radius:10px;border:1px solid var(--border);background:var(--background);padding:0 10px;font-size:13px;font-weight:500;color:var(--foreground);transition:background 0.12s" style-hover="background:var(--muted)">
+          <span style="display:flex;min-width:0;align-items:center;gap:8px">
+            <span style="width:7px;height:7px;border-radius:9999px;background:{{ ctxDot }};flex-shrink:0"></span>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'Geist Mono',monospace;font-size:12.5px">{{ activeCtx }}</span>
+          </span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;opacity:0.5"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
+        </button>
+        <sc-if value="{{ ctxOpen }}" hint-placeholder-val="{{ false }}">
+          <ul style="position:absolute;left:0;z-index:50;margin:6px 0 0;padding:4px;width:288px;border-radius:12px;border:1px solid var(--border);background:var(--popover);color:var(--popover-foreground);box-shadow:0 10px 30px rgb(0 0 0/0.18);list-style:none;box-sizing:border-box;animation:fadeIn 0.12s ease">
+            <li style="padding:6px 8px 4px;font-size:11px;font-weight:500;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted-foreground)">Contexts</li>
+            <sc-for list="{{ contexts }}" as="c" hint-placeholder-count="3">
+              <li>
+                <button onClick="{{ c.choose }}" title="{{ c.title }}" style="display:flex;width:100%;align-items:center;justify-content:space-between;gap:8px;border-radius:8px;padding:6px 8px;text-align:left;font-size:13px;border:none;background:transparent;color:var(--foreground);font-weight:{{ c.weight }}" style-hover="background:var(--muted)">
+                  <span style="display:flex;min-width:0;align-items:center;gap:8px">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;opacity:{{ c.checkOpacity }}"><path d="M20 6 9 17l-5-5"></path></svg>
+                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'Geist Mono',monospace;font-size:12.5px">{{ c.name }}</span>
+                  </span>
+                  <span style="flex-shrink:0;display:inline-flex;align-items:center;gap:4px;border-radius:8px;padding:2px 6px;font-size:12px;font-weight:500;background:{{ c.badgeBg }};color:{{ c.badgeColor }}">{{ c.health }}</span>
+                </button>
+              </li>
+            </sc-for>
+            <li role="separator" style="margin:4px 4px;height:1px;background:var(--border)"></li>
+            <li>
+              <button onClick="{{ closeCtx }}" style="display:flex;width:100%;align-items:center;gap:8px;border-radius:8px;padding:6px 8px;text-align:left;font-size:13px;border:none;background:transparent;color:var(--muted-foreground)" style-hover="background:var(--muted);color:var(--foreground)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                Manage kubeconfig sources
+              </button>
+            </li>
+          </ul>
+        </sc-if>
+      </div>
+      <div style="margin-left:auto;display:flex;flex:1;align-items:center;justify-content:flex-end;gap:10px;min-width:0">
+        <div style="position:relative;width:100%;max-width:360px;min-width:120px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--muted-foreground)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:9px;top:50%;width:14px;height:14px;transform:translateY(-50%);pointer-events:none"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+          <input value="{{ searchQ }}" onChange="{{ onSearch }}" placeholder="Search resources…" aria-label="Search resources" style="height:32px;width:100%;box-sizing:border-box;border-radius:10px;border:1px solid var(--input);background:transparent;padding:4px 34px 4px 30px;font-size:13px;outline:none;color:var(--foreground);transition:border-color 0.12s, box-shadow 0.12s" style-focus="border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in oklch, var(--ring) 40%, transparent)"></input>
+          <kbd style="position:absolute;right:8px;top:50%;transform:translateY(-50%);border-radius:6px;border:1px solid var(--border);background:var(--muted);color:var(--muted-foreground);padding:1px 6px;font-family:'Geist Mono',monospace;font-size:11px;pointer-events:none">/</kbd>
+          <sc-if value="{{ searchOpen }}" hint-placeholder-val="{{ false }}">
+            <div role="listbox" style="position:absolute;z-index:40;margin-top:6px;max-height:320px;width:100%;overflow-y:auto;border-radius:12px;border:1px solid var(--border);background:var(--popover);padding:4px;box-shadow:0 10px 30px rgb(0 0 0/0.18);box-sizing:border-box;animation:fadeIn 0.12s ease">
+              <sc-if value="{{ searchEmpty }}" hint-placeholder-val="{{ false }}">
+                <p style="padding:10px 8px;margin:0;font-size:13px;color:var(--muted-foreground)">No matches for “{{ searchQ }}”.</p>
+              </sc-if>
+              <sc-for list="{{ searchResults }}" as="r" hint-placeholder-count="0">
+                <button onClick="{{ r.go }}" style="display:flex;width:100%;align-items:center;justify-content:space-between;gap:12px;border-radius:8px;padding:6px 8px;text-align:left;font-size:13px;border:none;background:transparent;color:var(--foreground)" style-hover="background:var(--muted)">
+                  <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'Geist Mono',monospace;font-size:12px;font-weight:500">{{ r.name }}</span>
+                  <span style="flex-shrink:0;font-size:11.5px;color:var(--muted-foreground)">{{ r.kind }} · {{ r.ns }}</span>
+                </button>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+        <div role="radiogroup" aria-label="Color theme" style="display:inline-flex;align-items:center;gap:2px;border-radius:10px;border:1px solid var(--border);background:var(--card);padding:2px;flex-shrink:0">
+          <sc-for list="{{ themeOptions }}" as="t" hint-placeholder-count="3">
+            <button role="radio" aria-checked="{{ t.active }}" aria-label="{{ t.label }}" title="{{ t.label }}" onClick="{{ t.choose }}" style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:8px;border:none;background:{{ t.bg }};color:{{ t.color }};transition:background 0.12s, color 0.12s" style-hover="color:var(--foreground)">
+              <sc-if value="{{ t.isSun }}" hint-placeholder-val="{{ true }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg></sc-if>
+              <sc-if value="{{ t.isMonitor }}" hint-placeholder-val="{{ false }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><rect width="20" height="14" x="2" y="3" rx="2"></rect><path d="M8 21h8"></path><path d="M12 17v4"></path></svg></sc-if>
+              <sc-if value="{{ t.isMoon }}" hint-placeholder-val="{{ false }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg></sc-if>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </header>
+  <div style="display:flex;min-height:0;flex:1">
+    <sc-if value="{{ showSidebar }}" hint-placeholder-val="{{ true }}">
+      <aside style="width:216px;flex-shrink:0;overflow-y:auto;background:var(--sidebar);border-right:1px solid var(--sidebar-border)">
+        <nav style="padding:12px;display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;flex-direction:column;gap:1px">
+            <sc-for list="{{ pinnedNav }}" as="item" hint-placeholder-count="3">
+              <a href="#" onClick="{{ item.go }}" style="display:flex;align-items:center;gap:8px;border-radius:8px;padding:5px 8px;font-size:13px;color:{{ item.color }};background:{{ item.bg }};font-weight:{{ item.weight }};text-decoration:none" style-hover="background:var(--sidebar-accent);color:var(--sidebar-accent-foreground);text-decoration:none">
+                <sc-if value="{{ item.isGrid }}" hint-placeholder-val="{{ true }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;flex-shrink:0"><rect width="7" height="9" x="3" y="3" rx="1"></rect><rect width="7" height="5" x="14" y="3" rx="1"></rect><rect width="7" height="9" x="14" y="12" rx="1"></rect><rect width="7" height="5" x="3" y="16" rx="1"></rect></svg></sc-if>
+                <sc-if value="{{ item.isServer }}" hint-placeholder-val="{{ false }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;flex-shrink:0"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"></rect><rect width="20" height="8" x="2" y="14" rx="2" ry="2"></rect><line x1="6" x2="6.01" y1="6" y2="6"></line><line x1="6" x2="6.01" y1="18" y2="18"></line></svg></sc-if>
+                <sc-if value="{{ item.isActivity }}" hint-placeholder-val="{{ false }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;flex-shrink:0"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg></sc-if>
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ item.label }}</span>
+              </a>
+            </sc-for>
+          </div>
+          <sc-for list="{{ navGroups }}" as="group" hint-placeholder-count="3">
+            <div>
+              <p style="margin:0 0 4px;padding:0 8px;font-size:11px;font-weight:500;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted-foreground)">{{ group.label }}</p>
+              <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:1px">
+                <sc-for list="{{ group.items }}" as="r" hint-placeholder-count="4">
+                  <li>
+                    <a href="#" onClick="{{ r.go }}" title="{{ r.resource }}" style="display:flex;align-items:center;gap:8px;border-radius:8px;padding:4px 8px;font-size:13px;color:{{ r.color }};background:{{ r.bg }};font-weight:{{ r.weight }};text-decoration:none" style-hover="background:var(--sidebar-accent);color:var(--sidebar-accent-foreground);text-decoration:none">
+                      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.label }}</span>
+                      <sc-if value="{{ showCounts }}" hint-placeholder-val="{{ true }}"><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:var(--muted-foreground);opacity:{{ r.countOpacity }}">{{ r.count }}</span></sc-if>
+                    </a>
+                  </li>
+                </sc-for>
+              </ul>
+            </div>
+          </sc-for>
+        </nav>
+      </aside>
+    </sc-if>
+    <main style="min-width:0;flex:1;overflow-y:auto">
+      <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+        <div data-screen-label="Cluster overview (Dusk)" style="padding:20px 24px 32px;display:flex;flex-direction:column;gap:16px">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px">
+            <div>
+              <h1 style="margin:0;font-family:'Space Grotesk',sans-serif;font-size:20px;font-weight:600;letter-spacing:-0.02em">Cluster overview</h1>
+              <p style="margin:3px 0 0;font-size:13px;color:var(--muted-foreground);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-family:'Geist Mono',monospace;font-size:12px">{{ activeCtx }}</span>
+                <span>·</span><span>v1.30.0</span><span>·</span>
+                <span role="status" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;color:var(--badge-brand-fg)"><span style="width:7px;height:7px;border-radius:9999px;background:var(--brand)"></span>Live</span>
+              </p>
+            </div>
+            <button aria-label="Refresh overview" style="display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;border-radius:10px;border:1px solid var(--border);background:var(--background);padding:0 10px;font-size:12.8px;font-weight:500;color:var(--foreground);transition:background 0.12s" style-hover="background:var(--muted)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
+              Refresh
+            </button>
+          </div>
+          <sc-if value="{{ showBanner }}" hint-placeholder-val="{{ true }}">
+            <div role="status" style="display:flex;align-items:center;gap:10px;border-radius:12px;border:1px solid color-mix(in oklch, var(--destructive) 25%, transparent);background:color-mix(in oklch, var(--destructive) 7%, transparent);padding:8px 12px;font-size:13px">
+              <svg viewBox="0 0 24 24" fill="none" stroke="var(--destructive)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;flex-shrink:0"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+              <span style="min-width:0;flex:1"><span style="font-weight:500;color:var(--destructive)">1 workload failing</span> — <span style="font-family:'Geist Mono',monospace;font-size:12px">payments-api</span> is in CrashLoopBackOff in <span style="font-family:'Geist Mono',monospace;font-size:12px">payments</span></span>
+              <button onClick="{{ goCrashPod }}" style="flex-shrink:0;display:inline-flex;align-items:center;height:24px;border-radius:8px;border:none;background:color-mix(in oklch, var(--destructive) 10%, transparent);color:var(--destructive);padding:0 10px;font-size:12px;font-weight:500" style-hover="background:color-mix(in oklch, var(--destructive) 20%, transparent)">Inspect</button>
+            </div>
+          </sc-if>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:12px">
+            <sc-for list="{{ stats }}" as="st" hint-placeholder-count="4">
+              <div style="display:flex;flex-direction:column;gap:6px;border-radius:14px;background:var(--card);box-shadow:0 0 0 1px var(--ring-soft);padding:12px 14px">
+                <p style="margin:0;font-size:12px;font-weight:500;color:var(--muted-foreground)">{{ st.label }}</p>
+                <p style="margin:0;font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:600;line-height:1;letter-spacing:-0.02em;color:{{ st.valueColor }}">{{ st.value }}</p>
+                <div style="display:flex;flex-wrap:wrap;gap:4px;min-height:20px;align-items:center">
+                  <sc-for list="{{ st.badges }}" as="b" hint-placeholder-count="1">
+                    <span style="display:inline-flex;align-items:center;gap:4px;border-radius:8px;padding:2px 6px;font-size:11.5px;font-weight:500;background:{{ b.bg }};color:{{ b.color }};white-space:nowrap"><span style="width:5px;height:5px;border-radius:9999px;background:{{ b.dot }}"></span>{{ b.label }}</span>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="border-radius:14px;background:var(--card);box-shadow:0 0 0 1px var(--ring-soft);overflow:hidden">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 16px 10px">
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <h2 style="margin:0;font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:500">Pods</h2>
+                <span style="font-size:12px;color:var(--muted-foreground);font-family:'Geist Mono',monospace">{{ podCount }}</span>
+              </div>
+              <div style="margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+                <select value="{{ nsFilter }}" onChange="{{ onNsFilter }}" aria-label="Filter by namespace" style="height:28px;border-radius:10px;border:1px solid var(--input);background:var(--card);padding:0 8px;font-size:12.5px;color:var(--foreground);outline:none" style-focus="border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in oklch, var(--ring) 40%, transparent)">
+                  <option value="all">All namespaces</option>
+                  <sc-for list="{{ nsOptions }}" as="n" hint-placeholder-count="4"><option value="{{ n }}">{{ n }}</option></sc-for>
+                </select>
+                <select value="{{ statusFilter }}" onChange="{{ onStatusFilter }}" aria-label="Filter by status" style="height:28px;border-radius:10px;border:1px solid var(--input);background:var(--card);padding:0 8px;font-size:12.5px;color:var(--foreground);outline:none" style-focus="border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in oklch, var(--ring) 40%, transparent)">
+                  <option value="all">All statuses</option>
+                  <option value="Running">Running</option>
+                  <option value="Pending">Pending</option>
+                  <option value="CrashLoopBackOff">CrashLoopBackOff</option>
+                  <option value="Completed">Completed</option>
+                </select>
+                <input value="{{ podFilter }}" onChange="{{ onPodFilter }}" placeholder="Filter by name…" aria-label="Filter pods by name" style="height:28px;width:170px;box-sizing:border-box;border-radius:10px;border:1px solid var(--input);background:transparent;padding:0 10px;font-size:12.5px;outline:none;color:var(--foreground)" style-focus="border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in oklch, var(--ring) 40%, transparent)"></input>
+              </div>
+            </div>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:13px">
+                <thead>
+                  <tr>
+                    <th style="height:32px;padding:0 12px;text-align:left;vertical-align:middle;font-size:12px;font-weight:500;color:var(--muted-foreground);white-space:nowrap;border-bottom:1px solid var(--border)">Name</th>
+                    <th style="height:32px;padding:0 12px;text-align:left;vertical-align:middle;font-size:12px;font-weight:500;color:var(--muted-foreground);white-space:nowrap;border-bottom:1px solid var(--border)">Namespace</th>
+                    <th style="height:32px;padding:0 12px;text-align:left;vertical-align:middle;font-size:12px;font-weight:500;color:var(--muted-foreground);white-space:nowrap;border-bottom:1px solid var(--border)">Ready</th>
+                    <th style="height:32px;padding:0 12px;text-align:left;vertical-align:middle;font-size:12px;font-weight:500;color:var(--muted-foreground);white-space:nowrap;border-bottom:1px solid var(--border)">Status</th>
+                    <th style="height:32px;padding:0 12px;text-align:right;vertical-align:middle;font-size:12px;font-weight:500;color:var(--muted-foreground);white-space:nowrap;border-bottom:1px solid var(--border)">Restarts</th>
+                    <th style="height:32px;padding:0 12px;text-align:right;vertical-align:middle;font-size:12px;font-weight:500;color:var(--muted-foreground);white-space:nowrap;border-bottom:1px solid var(--border)">CPU</th>
+                    <th style="height:32px;padding:0 12px;text-align:right;vertical-align:middle;font-size:12px;font-weight:500;color:var(--muted-foreground);white-space:nowrap;border-bottom:1px solid var(--border)">Memory</th>
+                    <th style="height:32px;padding:0 12px;text-align:left;vertical-align:middle;font-size:12px;font-weight:500;color:var(--muted-foreground);white-space:nowrap;border-bottom:1px solid var(--border)">Node</th>
+                    <th style="height:32px;padding:0 12px;text-align:right;vertical-align:middle;font-size:12px;font-weight:500;color:var(--muted-foreground);white-space:nowrap;border-bottom:1px solid var(--border)">Age</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <sc-for list="{{ pods }}" as="p" hint-placeholder-count="9">
+                    <tr onClick="{{ p.go }}" style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.1s" style-hover="background:color-mix(in oklch, var(--muted) 50%, transparent)">
+                      <td style="padding:7px 12px;vertical-align:middle"><span style="font-family:'Geist Mono',monospace;font-size:12px;font-weight:500;color:var(--foreground)">{{ p.name }}</span></td>
+                      <td style="padding:7px 12px;vertical-align:middle"><a href="#" onClick="{{ p.goNs }}" style="font-size:12.5px;color:var(--muted-foreground)" style-hover="color:var(--primary)">{{ p.ns }}</a></td>
+                      <td style="padding:7px 12px;vertical-align:middle;font-family:'Geist Mono',monospace;font-size:12px;color:{{ p.readyColor }}">{{ p.ready }}</td>
+                      <td style="padding:7px 12px;vertical-align:middle"><span style="display:inline-flex;align-items:center;gap:5px;border-radius:8px;padding:2px 8px;font-size:12px;font-weight:500;background:{{ p.toneBg }};color:{{ p.toneColor }};white-space:nowrap"><span style="width:5px;height:5px;border-radius:9999px;background:{{ p.toneDot }}"></span>{{ p.status }}</span></td>
+                      <td style="padding:7px 12px;vertical-align:middle;text-align:right;font-family:'Geist Mono',monospace;font-size:12px;color:{{ p.restartColor }};font-weight:{{ p.restartWeight }}">{{ p.restarts }}</td>
+                      <td style="padding:7px 12px;vertical-align:middle;text-align:right;font-family:'Geist Mono',monospace;font-size:12px;color:var(--muted-foreground)">{{ p.cpu }}</td>
+                      <td style="padding:7px 12px;vertical-align:middle;text-align:right;font-family:'Geist Mono',monospace;font-size:12px;color:var(--muted-foreground)">{{ p.mem }}</td>
+                      <td style="padding:7px 12px;vertical-align:middle;font-size:12.5px;color:var(--muted-foreground)">{{ p.node }}</td>
+                      <td style="padding:7px 12px;vertical-align:middle;text-align:right;font-family:'Geist Mono',monospace;font-size:12px;color:var(--muted-foreground)">{{ p.age }}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ isPodDetail }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Pod detail (Dusk)" style="padding:20px 24px 32px;display:flex;flex-direction:column;gap:14px">
+          <nav aria-label="Breadcrumb" style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted-foreground)">
+            <a href="#" onClick="{{ goOverview }}" style="color:var(--muted-foreground)" style-hover="color:var(--primary)">Pods</a>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;opacity:0.5"><path d="m9 18 6-6-6-6"></path></svg>
+            <a href="#" onClick="{{ goNsOfPod }}" style="color:var(--muted-foreground)" style-hover="color:var(--primary)">{{ detailNs }}</a>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;opacity:0.5"><path d="m9 18 6-6-6-6"></path></svg>
+            <span style="font-family:'Geist Mono',monospace;font-size:12px;color:var(--foreground)">{{ detailName }}</span>
+          </nav>
+          <div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px">
+            <div style="min-width:0">
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+                <h1 style="margin:0;font-family:'Space Grotesk',sans-serif;font-size:19px;font-weight:600;letter-spacing:-0.02em;word-break:break-all">{{ detailName }}</h1>
+                <span style="display:inline-flex;align-items:center;gap:5px;border-radius:8px;padding:2px 8px;font-size:12px;font-weight:500;background:{{ detailToneBg }};color:{{ detailToneColor }};white-space:nowrap"><span style="width:5px;height:5px;border-radius:9999px;background:{{ detailToneDot }}"></span>{{ detailStatus }}</span>
+              </div>
+              <p style="margin:4px 0 0;font-size:13px;color:var(--muted-foreground)">Pod · core/v1 · namespace <a href="#" onClick="{{ goNsOfPod }}">{{ detailNs }}</a></p>
+            </div>
+            <div style="display:flex;flex-shrink:0;align-items:center;gap:8px">
+              <span role="status" style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;color:var(--badge-brand-fg)"><span style="width:7px;height:7px;border-radius:9999px;background:var(--brand)"></span>Live</span>
+              <button onClick="{{ openPodDialog }}" style="display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;border-radius:10px;border:none;background:color-mix(in oklch, var(--destructive) 10%, transparent);color:var(--destructive);padding:0 10px;font-size:12.8px;font-weight:500" style-hover="background:color-mix(in oklch, var(--destructive) 20%, transparent)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><path d="M3 6h18"></path><path d="M19 6v14c0 1.1-.9 2-2 2H7c-1.1 0-2-.9-2-2V6"></path><path d="M8 6V4c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg>
+                Delete
+              </button>
+            </div>
+          </div>
+          <div role="tablist" aria-label="Object views" style="display:flex;gap:2px;border-bottom:1px solid var(--border)">
+            <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
+              <button role="tab" onClick="{{ t.go }}" style="margin-bottom:-1px;border:none;border-bottom:2px solid {{ t.border }};background:transparent;padding:6px 12px;font-size:13px;color:{{ t.color }};font-weight:{{ t.weight }};transition:color 0.12s" style-hover="color:var(--foreground)">{{ t.label }}</button>
+            </sc-for>
+          </div>
+          <sc-if value="{{ tabSummary }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <dl style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0;border-radius:14px;background:var(--card);box-shadow:0 0 0 1px var(--ring-soft);padding:14px 16px">
+                <sc-for list="{{ detailFields }}" as="f" hint-placeholder-count="6">
+                  <div style="min-width:0">
+                    <dt style="font-size:11.5px;font-weight:500;color:var(--muted-foreground)">{{ f.label }}</dt>
+                    <dd style="margin:3px 0 0;font-size:13px;font-weight:500;word-break:break-all;font-family:{{ f.font }};color:{{ f.color }}">{{ f.value }}</dd>
+                  </div>
+                </sc-for>
+              </dl>
+              <section>
+                <h3 style="margin:0 0 8px;font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:500">Containers</h3>
+                <div style="border-radius:14px;box-shadow:0 0 0 1px var(--ring-soft);background:var(--card);overflow-x:auto">
+                  <table style="width:100%;border-collapse:collapse;font-size:13px">
+                    <thead><tr>
+                      <th style="height:32px;padding:0 12px;text-align:left;font-size:12px;font-weight:500;color:var(--muted-foreground);border-bottom:1px solid var(--border);white-space:nowrap">Container</th>
+                      <th style="height:32px;padding:0 12px;text-align:left;font-size:12px;font-weight:500;color:var(--muted-foreground);border-bottom:1px solid var(--border);white-space:nowrap">State</th>
+                      <th style="height:32px;padding:0 12px;text-align:left;font-size:12px;font-weight:500;color:var(--muted-foreground);border-bottom:1px solid var(--border);white-space:nowrap">Ready</th>
+                      <th style="height:32px;padding:0 12px;text-align:right;font-size:12px;font-weight:500;color:var(--muted-foreground);border-bottom:1px solid var(--border);white-space:nowrap">Restarts</th>
+                      <th style="height:32px;padding:0 12px;text-align:left;font-size:12px;font-weight:500;color:var(--muted-foreground);border-bottom:1px solid var(--border);white-space:nowrap">Image</th>
+                    </tr></thead>
+                    <tbody>
+                      <sc-for list="{{ containers }}" as="c" hint-placeholder-count="2">
+                        <tr style="border-bottom:1px solid var(--border)">
+                          <td style="padding:7px 12px;vertical-align:middle"><span style="font-family:'Geist Mono',monospace;font-size:12px;font-weight:500">{{ c.name }}</span><span style="font-size:11px;color:var(--muted-foreground);margin-left:6px">{{ c.kind }}</span></td>
+                          <td style="padding:7px 12px;vertical-align:middle"><span style="display:inline-flex;align-items:center;gap:5px;border-radius:8px;padding:2px 8px;font-size:12px;font-weight:500;background:{{ c.toneBg }};color:{{ c.toneColor }};white-space:nowrap"><span style="width:5px;height:5px;border-radius:9999px;background:{{ c.toneDot }}"></span>{{ c.state }}</span></td>
+                          <td style="padding:7px 12px;vertical-align:middle"><span style="display:inline-flex;border-radius:8px;border:1px solid var(--border);padding:1px 7px;font-size:11.5px;color:{{ c.readyColor }}">{{ c.readyLabel }}</span></td>
+                          <td style="padding:7px 12px;vertical-align:middle;text-align:right;font-family:'Geist Mono',monospace;font-size:12px;color:{{ c.restartColor }}">{{ c.restarts }}</td>
+                          <td style="padding:7px 12px;vertical-align:middle"><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:var(--muted-foreground);word-break:break-all">{{ c.image }}</span></td>
+                        </tr>
+                      </sc-for>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+              <section>
+                <h3 style="margin:0 0 8px;font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:500">Conditions</h3>
+                <div style="display:flex;flex-wrap:wrap;gap:6px">
+                  <sc-for list="{{ conditions }}" as="c" hint-placeholder-count="4">
+                    <span title="{{ c.reason }}" style="display:inline-flex;align-items:center;gap:4px;border-radius:8px;padding:2px 8px;font-size:12px;font-weight:500;background:{{ c.bg }};color:{{ c.color }};border:1px solid {{ c.border }}">{{ c.label }}</span>
+                  </sc-for>
+                </div>
+              </section>
+              <section aria-label="Port forwarding">
+                <h3 style="margin:0 0 8px;font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:500">Port forwarding</h3>
+                <form style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px">
+                  <label style="display:flex;flex-direction:column;gap:4px">
+                    <span style="font-size:11.5px;font-weight:500;color:var(--muted-foreground)">Pod port</span>
+                    <input type="number" placeholder="e.g. 8080" style="width:104px;height:28px;box-sizing:border-box;border-radius:10px;border:1px solid var(--input);background:transparent;padding:0 10px;font-size:12.5px;color:var(--foreground);outline:none;font-family:'Geist Mono',monospace" style-focus="border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in oklch, var(--ring) 40%, transparent)"></input>
+                  </label>
+                  <label style="display:flex;flex-direction:column;gap:4px">
+                    <span style="font-size:11.5px;font-weight:500;color:var(--muted-foreground)">Local port</span>
+                    <input type="number" placeholder="auto" style="width:104px;height:28px;box-sizing:border-box;border-radius:10px;border:1px solid var(--input);background:transparent;padding:0 10px;font-size:12.5px;color:var(--foreground);outline:none;font-family:'Geist Mono',monospace" style-focus="border-color:var(--ring);box-shadow:0 0 0 3px color-mix(in oklch, var(--ring) 40%, transparent)"></input>
+                  </label>
+                  <button type="button" style="display:inline-flex;align-items:center;justify-content:center;height:28px;border-radius:10px;border:none;background:var(--primary);color:var(--primary-foreground);padding:0 12px;font-size:12.8px;font-weight:500;transition:background 0.12s" style-hover="background:color-mix(in oklch, var(--primary) 80%, transparent)">Forward</button>
+                  <span style="font-size:11.5px;color:var(--muted-foreground);padding-bottom:6px">Declared ports: <span style="font-family:'Geist Mono',monospace">8080</span></span>
+                </form>
+              </section>
+              <section aria-label="Events">
+                <h3 style="margin:0 0 8px;font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:500">Events</h3>
+                <ul style="margin:0;padding:0;list-style:none;border-radius:14px;box-shadow:0 0 0 1px var(--ring-soft);background:var(--card);overflow:hidden">
+                  <sc-for list="{{ events }}" as="e" hint-placeholder-count="3">
+                    <li style="display:flex;align-items:flex-start;gap:10px;padding:8px 12px;font-size:13px;border-bottom:1px solid {{ e.divider }}">
+                      <span style="flex-shrink:0;display:inline-flex;border-radius:8px;padding:2px 7px;font-size:11.5px;font-weight:500;background:{{ e.toneBg }};color:{{ e.toneColor }};border:1px solid {{ e.badgeBorder }};margin-top:1px">{{ e.type }}</span>
+                      <span style="min-width:0;flex:1">
+                        <span style="display:flex;align-items:center;gap:6px"><span style="font-weight:500;font-size:12.5px">{{ e.reason }}</span><span style="font-size:11px;color:var(--muted-foreground);font-family:'Geist Mono',monospace">{{ e.count }}</span></span>
+                        <span style="display:block;overflow-wrap:break-word;color:var(--muted-foreground);font-size:12.5px;line-height:1.45">{{ e.message }}</span>
+                      </span>
+                      <span style="flex-shrink:0;font-size:11.5px;color:var(--muted-foreground);font-family:'Geist Mono',monospace">{{ e.age }}</span>
+                    </li>
+                  </sc-for>
+                </ul>
+              </section>
+            </div>
+          </sc-if>
+          <sc-if value="{{ tabOther }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px dashed var(--border);border-radius:14px;padding:56px 24px;text-align:center;font-size:13px;color:var(--muted-foreground)">{{ tabPlaceholder }}</div>
+          </sc-if>
+        </div>
+      </sc-if>
+      <sc-if value="{{ isNsDetail }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="Namespace detail (Dusk)" style="padding:20px 24px 32px;display:flex;flex-direction:column;gap:14px">
+          <nav aria-label="Breadcrumb" style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted-foreground)">
+            <a href="#" onClick="{{ goOverview }}" style="color:var(--muted-foreground)" style-hover="color:var(--primary)">Namespaces</a>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;opacity:0.5"><path d="m9 18 6-6-6-6"></path></svg>
+            <span style="font-family:'Geist Mono',monospace;font-size:12px;color:var(--foreground)">payments</span>
+          </nav>
+          <div style="display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px">
+            <div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+                <h1 style="margin:0;font-family:'Space Grotesk',sans-serif;font-size:19px;font-weight:600;letter-spacing:-0.02em">payments</h1>
+                <span style="display:inline-flex;align-items:center;gap:5px;border-radius:8px;padding:2px 8px;font-size:12px;font-weight:500;background:color-mix(in oklch, var(--brand) 15%, transparent);color:var(--badge-brand-fg)"><span style="width:5px;height:5px;border-radius:9999px;background:var(--brand)"></span>Active</span>
+              </div>
+              <p style="margin:4px 0 0;font-size:13px;color:var(--muted-foreground)">Namespace · core/v1 · created 21 days ago</p>
+            </div>
+            <button onClick="{{ openNsDialog }}" style="display:inline-flex;flex-shrink:0;align-items:center;justify-content:center;gap:5px;height:28px;border-radius:10px;border:none;background:color-mix(in oklch, var(--destructive) 10%, transparent);color:var(--destructive);padding:0 10px;font-size:12.8px;font-weight:500" style-hover="background:color-mix(in oklch, var(--destructive) 20%, transparent)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><path d="M3 6h18"></path><path d="M19 6v14c0 1.1-.9 2-2 2H7c-1.1 0-2-.9-2-2V6"></path><path d="M8 6V4c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg>
+              Delete namespace
+            </button>
+          </div>
+          <dl style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0;border-radius:14px;background:var(--card);box-shadow:0 0 0 1px var(--ring-soft);padding:14px 16px">
+            <sc-for list="{{ nsFields }}" as="f" hint-placeholder-count="5">
+              <div style="min-width:0">
+                <dt style="font-size:11.5px;font-weight:500;color:var(--muted-foreground)">{{ f.label }}</dt>
+                <dd style="margin:3px 0 0;font-size:13px;font-weight:500;word-break:break-all;font-family:{{ f.font }};color:{{ f.color }}">{{ f.value }}</dd>
+              </div>
+            </sc-for>
+          </dl>
+          <section>
+            <h3 style="margin:0 0 8px;font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:500">Labels</h3>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <sc-for list="{{ nsLabels }}" as="l" hint-placeholder-count="3">
+                <span style="display:inline-flex;border-radius:8px;padding:2px 8px;font-size:11.5px;background:var(--secondary);color:var(--secondary-foreground);font-family:'Geist Mono',monospace">{{ l }}</span>
+              </sc-for>
+            </div>
+          </section>
+          <sc-if value="{{ showQuotas }}" hint-placeholder-val="{{ true }}">
+            <section aria-label="Resource quota">
+              <h3 style="margin:0 0 8px;font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:500">Resource quota <span style="font-family:'Geist Mono',monospace;font-size:11px;font-weight:400;color:var(--muted-foreground);margin-left:4px">payments-quota</span></h3>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+                <sc-for list="{{ quotas }}" as="q" hint-placeholder-count="2">
+                  <div style="border-radius:14px;background:var(--card);box-shadow:0 0 0 1px var(--ring-soft);padding:12px 14px">
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+                      <span style="font-size:12px;font-weight:500;color:var(--muted-foreground);font-family:'Geist Mono',monospace">{{ q.name }}</span>
+                      <span style="font-size:12px;font-family:'Geist Mono',monospace">{{ q.used }} <span style="color:var(--muted-foreground)">/ {{ q.hard }}</span></span>
+                    </div>
+                    <div style="height:6px;border-radius:9999px;background:var(--muted);overflow:hidden">
+                      <div style="height:100%;border-radius:9999px;background:var(--chart-1);width:{{ q.pct }}"></div>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </section>
+          </sc-if>
+          <section>
+            <h3 style="margin:0 0 8px;font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:500">Pods in this namespace <span style="font-size:11px;font-weight:400;color:var(--muted-foreground);font-family:'Geist Mono',monospace;margin-left:4px">{{ nsPodCount }}</span></h3>
+            <div style="border-radius:14px;box-shadow:0 0 0 1px var(--ring-soft);background:var(--card);overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font-size:13px">
+                <thead><tr>
+                  <th style="height:32px;padding:0 12px;text-align:left;font-size:12px;font-weight:500;color:var(--muted-foreground);border-bottom:1px solid var(--border);white-space:nowrap">Name</th>
+                  <th style="height:32px;padding:0 12px;text-align:left;font-size:12px;font-weight:500;color:var(--muted-foreground);border-bottom:1px solid var(--border);white-space:nowrap">Ready</th>
+                  <th style="height:32px;padding:0 12px;text-align:left;font-size:12px;font-weight:500;color:var(--muted-foreground);border-bottom:1px solid var(--border);white-space:nowrap">Status</th>
+                  <th style="height:32px;padding:0 12px;text-align:right;font-size:12px;font-weight:500;color:var(--muted-foreground);border-bottom:1px solid var(--border);white-space:nowrap">Restarts</th>
+                  <th style="height:32px;padding:0 12px;text-align:right;font-size:12px;font-weight:500;color:var(--muted-foreground);border-bottom:1px solid var(--border);white-space:nowrap">Age</th>
+                </tr></thead>
+                <tbody>
+                  <sc-for list="{{ nsPods }}" as="p" hint-placeholder-count="4">
+                    <tr onClick="{{ p.go }}" style="border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.1s" style-hover="background:color-mix(in oklch, var(--muted) 50%, transparent)">
+                      <td style="padding:7px 12px;vertical-align:middle"><span style="font-family:'Geist Mono',monospace;font-size:12px;font-weight:500">{{ p.name }}</span></td>
+                      <td style="padding:7px 12px;vertical-align:middle;font-family:'Geist Mono',monospace;font-size:12px;color:{{ p.readyColor }}">{{ p.ready }}</td>
+                      <td style="padding:7px 12px;vertical-align:middle"><span style="display:inline-flex;align-items:center;gap:5px;border-radius:8px;padding:2px 8px;font-size:12px;font-weight:500;background:{{ p.toneBg }};color:{{ p.toneColor }};white-space:nowrap"><span style="width:5px;height:5px;border-radius:9999px;background:{{ p.toneDot }}"></span>{{ p.status }}</span></td>
+                      <td style="padding:7px 12px;vertical-align:middle;text-align:right;font-family:'Geist Mono',monospace;font-size:12px;color:{{ p.restartColor }};font-weight:{{ p.restartWeight }}">{{ p.restarts }}</td>
+                      <td style="padding:7px 12px;vertical-align:middle;text-align:right;font-family:'Geist Mono',monospace;font-size:12px;color:var(--muted-foreground)">{{ p.age }}</td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </sc-if>
+    </main>
+  </div>
+  <sc-if value="{{ dlgOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeDialog }}" style="position:fixed;inset:0;z-index:50;background:rgb(0 0 0/0.5);animation:fadeIn 0.15s ease"></div>
+    <div role="dialog" aria-modal="true" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:50;width:calc(100% - 32px);max-width:448px;border-radius:14px;border:1px solid var(--border);background:var(--popover);color:var(--popover-foreground);padding:24px;box-shadow:0 10px 30px rgb(0 0 0/0.25);box-sizing:border-box;animation:dlgIn 0.15s ease">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <h2 style="margin:0;font-size:16px;font-weight:600;font-family:'Space Grotesk',sans-serif">{{ dlgTitle }}</h2>
+        <p style="margin:0;font-size:13.5px;color:var(--muted-foreground);line-height:1.5">{{ dlgDescription }}</p>
+      </div>
+      <sc-if value="{{ dlgIsNs }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:14px;display:flex;gap:8px;border-radius:10px;border:1px solid color-mix(in oklch, var(--destructive) 25%, transparent);background:color-mix(in oklch, var(--destructive) 7%, transparent);padding:10px 12px;font-size:12.5px;line-height:1.5">
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--destructive)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;margin-top:2px"><circle cx="12" cy="12" r="10"></circle><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg>
+          <span>Everything in <span style="font-family:'Geist Mono',monospace;font-size:12px">payments</span> is deleted with it — <strong style="font-weight:600">4 pods, 3 services, 2 config maps, 1 secret</strong> — and finalizers may hold the namespace in Terminating.</span>
+        </div>
+      </sc-if>
+      <div style="margin-top:16px">
+        <label style="font-size:13px;font-weight:500;display:block;margin-bottom:6px">Type <span style="font-family:'Geist Mono',monospace;font-size:12px;background:var(--muted);padding:1px 5px;border-radius:6px">{{ dlgConfirmText }}</span> to confirm</label>
+        <input value="{{ typed }}" onChange="{{ onTyped }}" autoComplete="off" spellCheck="false" placeholder="{{ dlgConfirmText }}" style="height:32px;width:100%;box-sizing:border-box;border-radius:10px;border:1px solid var(--input);background:transparent;padding:0 10px;font-size:13px;outline:none;color:var(--foreground);font-family:'Geist Mono',monospace;transition:border-color 0.12s, box-shadow 0.12s" style-focus="border-color:var(--destructive);box-shadow:0 0 0 3px color-mix(in oklch, var(--destructive) 25%, transparent)"></input>
+      </div>
+      <div style="margin-top:20px;display:flex;justify-content:flex-end;gap:8px">
+        <button onClick="{{ closeDialog }}" style="display:inline-flex;align-items:center;justify-content:center;height:32px;border-radius:10px;border:1px solid var(--border);background:var(--background);padding:0 12px;font-size:13.5px;font-weight:500;color:var(--foreground);transition:background 0.12s" style-hover="background:var(--muted)">Cancel</button>
+        <button onClick="{{ confirmDelete }}" disabled="{{ deleteDisabled }}" style="display:inline-flex;align-items:center;justify-content:center;gap:5px;height:32px;border-radius:10px;border:none;background:color-mix(in oklch, var(--destructive) 10%, transparent);color:var(--destructive);padding:0 12px;font-size:13.5px;font-weight:500;opacity:{{ deleteOpacity }};pointer-events:{{ deletePointer }}" style-hover="background:color-mix(in oklch, var(--destructive) 20%, transparent)">{{ dlgConfirmLabel }}</button>
+      </div>
+    </div>
+  </sc-if>
+  <a href="Kubescope — Current UI.dc.html" style="position:fixed;right:16px;bottom:16px;z-index:40;display:inline-flex;align-items:center;gap:6px;border-radius:9999px;background:var(--card);color:var(--muted-foreground);border:1px solid var(--border);padding:7px 13px;font-size:12px;font-weight:500;box-shadow:0 4px 12px rgb(0 0 0/0.12);text-decoration:none" style-hover="color:var(--foreground);text-decoration:none">← Current UI</a>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;attentionBanner&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Overview&quot;},&quot;sidebarCounts&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Navigation&quot;},&quot;quotaBars&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Namespace detail&quot;}}">
+class Component extends DCLogic {
+  state = { route: "overview", tab: "summary", pod: "payments-api-5cc8b9d7f-hx2w9", theme: "light", ctxOpen: false, searchQ: "", dlgOpen: false, dlgKind: "ns", typed: "", activeCtx: "kind-dev", nsFilter: "all", statusFilter: "all", podFilter: "", narrow: false };
+
+  data = {
+    contexts: [
+      { name: "kind-dev", health: "Healthy", ok: true, title: "Server v1.30.0" },
+      { name: "kind-prod", health: "Healthy", ok: true, title: "Server v1.30.0" },
+      { name: "do-fra1-staging", health: "Unreachable", ok: false, title: "Cluster unreachable" },
+    ],
+    namespaces: ["checkout", "default", "kube-node-lease", "kube-public", "kube-system", "local-path-storage", "monitoring", "payments"],
+    pods: [
+      { name: "api-gateway-75d9c6bf4-q8znt", ns: "payments", ready: "2/2", readyOk: true, status: "Running", restarts: 0, age: "6h", node: "dev-worker", ip: "10.244.1.12", app: "api-gateway", image: "ghcr.io/skriptvalley/api-gateway:2.1.0", cpu: "12m", mem: "96Mi" },
+      { name: "payments-api-5cc8b9d7f-hx2w9", ns: "payments", ready: "0/1", readyOk: false, status: "CrashLoopBackOff", restarts: 17, age: "3h", node: "dev-worker2", ip: "10.244.2.17", app: "payments-api", image: "ghcr.io/skriptvalley/payments-api:1.4.2", cpu: "—", mem: "—" },
+      { name: "payments-api-5cc8b9d7f-m4tvc", ns: "payments", ready: "1/1", readyOk: true, status: "Running", restarts: 2, age: "3h", node: "dev-worker", ip: "10.244.1.31", app: "payments-api", image: "ghcr.io/skriptvalley/payments-api:1.4.2", cpu: "38m", mem: "210Mi" },
+      { name: "payments-worker-6d88f7c9b-r9ks4", ns: "payments", ready: "1/1", readyOk: true, status: "Running", restarts: 0, age: "26h", node: "dev-worker2", ip: "10.244.2.9", app: "payments-worker", image: "ghcr.io/skriptvalley/payments-worker:1.4.2", cpu: "21m", mem: "148Mi" },
+      { name: "checkout-7b6df954c-vv6mp", ns: "checkout", ready: "0/1", readyOk: false, status: "Pending", restarts: 0, age: "8m", node: "—", ip: "—", app: "checkout", image: "ghcr.io/skriptvalley/checkout:3.0.1", cpu: "—", mem: "—" },
+      { name: "redis-0", ns: "checkout", ready: "1/1", readyOk: true, status: "Running", restarts: 0, age: "9d", node: "dev-worker", ip: "10.244.1.4", app: "redis", image: "redis:7.2-alpine", cpu: "6m", mem: "32Mi" },
+      { name: "web-6f9c7bd45-2xkqp", ns: "default", ready: "1/1", readyOk: true, status: "Running", restarts: 0, age: "2d", node: "dev-worker", ip: "10.244.1.22", app: "web", image: "nginx:1.27-alpine", cpu: "3m", mem: "18Mi" },
+      { name: "web-6f9c7bd45-b7wrd", ns: "default", ready: "1/1", readyOk: true, status: "Running", restarts: 0, age: "2d", node: "dev-worker2", ip: "10.244.2.5", app: "web", image: "nginx:1.27-alpine", cpu: "3m", mem: "17Mi" },
+      { name: "heartbeat-29154732-x7lnq", ns: "default", ready: "0/1", readyOk: false, status: "Completed", restarts: 0, age: "1m", node: "dev-worker2", ip: "10.244.2.44", app: "heartbeat", image: "busybox:1.36", cpu: "—", mem: "—" },
+      { name: "prometheus-0", ns: "monitoring", ready: "2/2", readyOk: true, status: "Running", restarts: 0, age: "5d", node: "dev-worker", ip: "10.244.1.7", app: "prometheus", image: "quay.io/prometheus/prometheus:v2.53.0", cpu: "64m", mem: "512Mi" },
+      { name: "coredns-7db6d8ff4d-lq5xk", ns: "kube-system", ready: "1/1", readyOk: true, status: "Running", restarts: 1, age: "12d", node: "dev-control-plane", ip: "10.244.0.3", app: "coredns", image: "registry.k8s.io/coredns/coredns:v1.11.1", cpu: "4m", mem: "24Mi" },
+      { name: "local-path-provisioner-988d74bc-mm4gk", ns: "local-path-storage", ready: "1/1", readyOk: true, status: "Running", restarts: 1, age: "12d", node: "dev-control-plane", ip: "10.244.0.4", app: "local-path-provisioner", image: "docker.io/kindest/local-path-provisioner:v20240202", cpu: "2m", mem: "14Mi" },
+    ],
+    navGroups: [
+      { label: "core", items: [["Pod", 12], ["Service", 7], ["ConfigMap", 9], ["Secret", 5], ["Namespace", 8], ["PersistentVolumeClaim", 2], ["ServiceAccount", 11]] },
+      { label: "apps", items: [["Deployment", 6], ["StatefulSet", 2], ["DaemonSet", 2], ["ReplicaSet", 9]] },
+      { label: "batch", items: [["Job", 3], ["CronJob", 1]] },
+      { label: "networking.k8s.io", items: [["Ingress", 2], ["NetworkPolicy", 1]] },
+      { label: "rbac.authorization.k8s.io", items: [["Role", 4], ["RoleBinding", 4]] },
+      { label: "storage.k8s.io", items: [["StorageClass", 1]] },
+    ],
+  };
+
+  componentDidMount() {
+    let stored = null;
+    try { stored = localStorage.getItem("kubescope-dusk-theme"); } catch (e) {}
+    const theme = stored === "dark" || stored === "system" || stored === "light" ? stored : "light";
+    this.mq = window.matchMedia("(prefers-color-scheme: dark)");
+    this.onMq = () => { if (this.state.theme === "system") this.applyTheme("system"); };
+    this.mq.addEventListener("change", this.onMq);
+    this.onResize = () => { const narrow = window.innerWidth < 920; if (narrow !== this.state.narrow) this.setState({ narrow }); };
+    window.addEventListener("resize", this.onResize);
+    this.onKey = (e) => { if (e.key === "Escape") this.setState({ dlgOpen: false, ctxOpen: false }); };
+    document.addEventListener("keydown", this.onKey);
+    this.setState({ theme, narrow: window.innerWidth < 920 });
+    this.applyTheme(theme);
+  }
+  componentWillUnmount() {
+    if (this.mq) this.mq.removeEventListener("change", this.onMq);
+    window.removeEventListener("resize", this.onResize);
+    document.removeEventListener("keydown", this.onKey);
+  }
+  applyTheme(t) {
+    const dark = t === "dark" || (t === "system" && this.mq && this.mq.matches);
+    document.documentElement.classList.toggle("dark", dark);
+  }
+  setTheme(t) {
+    try { localStorage.setItem("kubescope-dusk-theme", t); } catch (e) {}
+    this.setState({ theme: t });
+    this.applyTheme(t);
+  }
+
+  tone(status) {
+    if (status === "Running") return { bg: "color-mix(in oklch, var(--brand) 15%, transparent)", color: "var(--badge-brand-fg)", dot: "var(--brand)" };
+    if (status === "Pending" || status.startsWith("Init:") || status === "ContainerCreating") return { bg: "color-mix(in oklch, var(--highlight) 15%, transparent)", color: "var(--badge-hl-fg)", dot: "var(--highlight)" };
+    if (status === "CrashLoopBackOff" || status === "Failed" || status.endsWith("Error") || status === "Evicted") return { bg: "color-mix(in oklch, var(--destructive) 10%, transparent)", color: "var(--destructive)", dot: "var(--destructive)" };
+    return { bg: "var(--muted)", color: "var(--muted-foreground)", dot: "var(--muted-foreground)" };
+  }
+
+  podRow(p, nav) {
+    const t = this.tone(p.status);
+    return {
+      name: p.name, ns: p.ns, ready: p.ready, status: p.status, restarts: String(p.restarts), age: p.age, node: p.node, cpu: p.cpu, mem: p.mem,
+      readyColor: p.readyOk ? "var(--foreground)" : "var(--muted-foreground)",
+      toneBg: t.bg, toneColor: t.color, toneDot: t.dot,
+      restartColor: p.restarts > 5 ? "var(--destructive)" : p.restarts > 0 ? "var(--badge-hl-fg)" : "var(--muted-foreground)",
+      restartWeight: p.restarts > 5 ? 600 : 400,
+      go: () => nav("pod", { pod: p.name, tab: "summary" }),
+      goNs: (e) => { e.preventDefault(); e.stopPropagation(); nav("ns"); },
+    };
+  }
+
+  renderVals() {
+    const s = this.state, d = this.data;
+    const set = (p) => this.setState(p);
+    const nav = (route, extra) => set(Object.assign({ route, ctxOpen: false, searchQ: "", dlgOpen: false, typed: "" }, extra));
+    const pod = d.pods.find((p) => p.name === s.pod) || d.pods[1];
+    const crash = pod.status === "CrashLoopBackOff";
+    const pending = pod.status === "Pending";
+    const dt = this.tone(pod.status);
+    const q = s.searchQ.trim().toLowerCase();
+    const searchPool = d.pods.map((p) => ({ name: p.name, kind: "Pod", ns: p.ns, go: () => nav("pod", { pod: p.name, tab: "summary" }) }))
+      .concat(d.namespaces.map((n) => ({ name: n, kind: "Namespace", ns: "—", go: () => nav(n === "payments" ? "ns" : "overview") })));
+    const searchResults = q.length >= 2 ? searchPool.filter((r) => r.name.toLowerCase().includes(q)).slice(0, 8) : [];
+    const filtered = d.pods.filter((p) => (s.nsFilter === "all" || p.ns === s.nsFilter) && (s.statusFilter === "all" || p.status === s.statusFilter) && (s.podFilter.trim() === "" || p.name.includes(s.podFilter.trim())));
+    const nsPods = d.pods.filter((p) => p.ns === "payments");
+    const running = d.pods.filter((p) => p.status === "Running").length;
+    const isNsDlg = s.dlgKind === "ns";
+    const confirmText = isNsDlg ? "payments" : pod.name;
+    const canDelete = s.typed === confirmText;
+    const badge = (label, kind) => {
+      const map = { brand: ["color-mix(in oklch, var(--brand) 15%, transparent)", "var(--badge-brand-fg)", "var(--brand)"], hl: ["color-mix(in oklch, var(--highlight) 15%, transparent)", "var(--badge-hl-fg)", "var(--highlight)"], destr: ["color-mix(in oklch, var(--destructive) 10%, transparent)", "var(--destructive)", "var(--destructive)"], muted: ["var(--muted)", "var(--muted-foreground)", "var(--muted-foreground)"] };
+      return { label, bg: map[kind][0], color: map[kind][1], dot: map[kind][2] };
+    };
+    const evTone = (t) => (t === "Warning" ? { bg: "color-mix(in oklch, var(--destructive) 10%, transparent)", color: "var(--destructive)", border: "transparent" } : { bg: "transparent", color: "var(--muted-foreground)", border: "var(--border)" });
+    const active = (r) => s.route === r;
+    const navItemStyle = (on) => ({ color: on ? "var(--sidebar-primary)" : "var(--sidebar-foreground)", bg: on ? "var(--sidebar-accent)" : "transparent", weight: on ? 500 : 400 });
+
+    return {
+      activeCtx: s.activeCtx,
+      ctxDot: s.activeCtx === "do-fra1-staging" ? "var(--destructive)" : "var(--brand)",
+      toggleCtx: () => set({ ctxOpen: !s.ctxOpen }),
+      closeCtx: () => set({ ctxOpen: false }),
+      ctxOpen: s.ctxOpen,
+      contexts: d.contexts.map((c) => ({
+        name: c.name, health: c.health, title: c.title,
+        weight: c.name === s.activeCtx ? 500 : 400,
+        checkOpacity: c.name === s.activeCtx ? 1 : 0,
+        badgeBg: c.ok ? "color-mix(in oklch, var(--brand) 15%, transparent)" : "color-mix(in oklch, var(--destructive) 10%, transparent)",
+        badgeColor: c.ok ? "var(--badge-brand-fg)" : "var(--destructive)",
+        choose: () => set({ activeCtx: c.name, ctxOpen: false }),
+      })),
+      searchQ: s.searchQ,
+      onSearch: (e) => set({ searchQ: e.target.value }),
+      searchOpen: q.length >= 2,
+      searchEmpty: q.length >= 2 && searchResults.length === 0,
+      searchResults,
+      themeOptions: [
+        { label: "Light", key: "light", isSun: true, isMonitor: false, isMoon: false },
+        { label: "System", key: "system", isSun: false, isMonitor: true, isMoon: false },
+        { label: "Dark", key: "dark", isSun: false, isMonitor: false, isMoon: true },
+      ].map((t) => ({
+        label: t.label, isSun: t.isSun, isMonitor: t.isMonitor, isMoon: t.isMoon,
+        active: s.theme === t.key,
+        bg: s.theme === t.key ? "var(--primary)" : "transparent",
+        color: s.theme === t.key ? "var(--primary-foreground)" : "var(--muted-foreground)",
+        choose: () => this.setTheme(t.key),
+      })),
+      showSidebar: !s.narrow,
+      showCounts: this.props.sidebarCounts ?? true,
+      pinnedNav: [
+        Object.assign({ label: "Overview", isGrid: true, isServer: false, isActivity: false, go: (e) => { e.preventDefault(); nav("overview"); } }, navItemStyle(active("overview"))),
+        Object.assign({ label: "Nodes", isGrid: false, isServer: true, isActivity: false, go: (e) => e.preventDefault() }, navItemStyle(false)),
+        Object.assign({ label: "Events", isGrid: false, isServer: false, isActivity: true, go: (e) => e.preventDefault() }, navItemStyle(false)),
+      ],
+      navGroups: d.navGroups.map((g) => ({
+        label: g.label,
+        items: g.items.map((pair) => {
+          const kind = pair[0];
+          const on = (kind === "Pod" && active("pod")) || (kind === "Namespace" && active("ns"));
+          return Object.assign({
+            label: kind, resource: kind.toLowerCase() + "s", count: String(pair[1]), countOpacity: 1,
+            go: (e) => { e.preventDefault(); if (kind === "Pod") nav("pod", { pod: s.pod }); else if (kind === "Namespace") nav("ns"); },
+          }, navItemStyle(on));
+        }),
+      })),
+      isOverview: active("overview"),
+      isPodDetail: active("pod"),
+      isNsDetail: active("ns"),
+      showBanner: this.props.attentionBanner ?? true,
+      goCrashPod: () => nav("pod", { pod: "payments-api-5cc8b9d7f-hx2w9", tab: "summary" }),
+      goOverview: (e) => { if (e && e.preventDefault) e.preventDefault(); nav("overview"); },
+      stats: [
+        { label: "Nodes", value: "3", valueColor: "var(--foreground)", badges: [badge("3 Ready", "brand")] },
+        { label: "Pods", value: "12", valueColor: "var(--foreground)", badges: [badge(running + " Running", "brand"), badge("1 Pending", "hl"), badge("1 Failing", "destr")] },
+        { label: "Namespaces", value: "8", valueColor: "var(--foreground)", badges: [badge("5 system", "muted")] },
+        { label: "Health", value: "Degraded", valueColor: "var(--destructive)", badges: [badge("1 CrashLoopBackOff", "destr")] },
+      ],
+      podCount: filtered.length + " of " + d.pods.length,
+      nsOptions: d.namespaces,
+      nsFilter: s.nsFilter,
+      statusFilter: s.statusFilter,
+      podFilter: s.podFilter,
+      onNsFilter: (e) => set({ nsFilter: e.target.value }),
+      onStatusFilter: (e) => set({ statusFilter: e.target.value }),
+      onPodFilter: (e) => set({ podFilter: e.target.value }),
+      pods: filtered.map((p) => this.podRow(p, nav)),
+      detailName: pod.name,
+      detailNs: pod.ns,
+      detailStatus: pod.status,
+      detailToneBg: dt.bg, detailToneColor: dt.color, detailToneDot: dt.dot,
+      goNsOfPod: (e) => { e.preventDefault(); nav("ns"); },
+      tabs: ["Summary", "Logs", "Terminal", "YAML"].map((label) => {
+        const key = label.toLowerCase(), on = s.tab === key;
+        return { label, go: () => set({ tab: key }), border: on ? "var(--primary)" : "transparent", color: on ? "var(--foreground)" : "var(--muted-foreground)", weight: on ? 500 : 400 };
+      }),
+      tabSummary: s.tab === "summary",
+      tabOther: s.tab !== "summary",
+      tabPlaceholder: s.tab === "logs" ? "Log stream — placeholder" : s.tab === "terminal" ? "Exec terminal — placeholder" : "YAML view — placeholder",
+      detailFields: [
+        { label: "Phase", value: pending ? "Pending" : "Running", font: "inherit", color: "var(--foreground)" },
+        { label: "Node", value: pod.node, font: "'Geist Mono',monospace", color: "var(--foreground)" },
+        { label: "Pod IP", value: pod.ip, font: "'Geist Mono',monospace", color: "var(--foreground)" },
+        { label: "QoS class", value: pending ? "—" : "Burstable", font: "inherit", color: "var(--foreground)" },
+        { label: "Controlled by", value: pod.app === "redis" || pod.app === "prometheus" ? "StatefulSet/" + pod.app : "ReplicaSet/" + pod.name.split("-").slice(0, -1).join("-"), font: "'Geist Mono',monospace", color: "var(--primary)" },
+        { label: "Age", value: pod.age, font: "'Geist Mono',monospace", color: "var(--foreground)" },
+      ],
+      containers: [
+        { name: "run-migrations", kind: "init", state: "Completed", toneBg: "var(--muted)", toneColor: "var(--muted-foreground)", toneDot: "var(--muted-foreground)", readyLabel: "—", readyColor: "var(--muted-foreground)", restarts: "0", restartColor: "var(--muted-foreground)", image: pod.image },
+        {
+          name: pod.app, kind: "", state: crash ? "CrashLoopBackOff" : pending ? "ContainerCreating" : "Running",
+          toneBg: this.tone(crash ? "CrashLoopBackOff" : pending ? "Pending" : "Running").bg,
+          toneColor: this.tone(crash ? "CrashLoopBackOff" : pending ? "Pending" : "Running").color,
+          toneDot: this.tone(crash ? "CrashLoopBackOff" : pending ? "Pending" : "Running").dot,
+          readyLabel: crash || pending ? "not ready" : "ready",
+          readyColor: crash || pending ? "var(--muted-foreground)" : "var(--foreground)",
+          restarts: String(pod.restarts), restartColor: pod.restarts > 5 ? "var(--destructive)" : "var(--foreground)", image: pod.image,
+        },
+      ],
+      conditions: [
+        { label: "Initialized=True", reason: "", bg: "var(--secondary)", color: "var(--secondary-foreground)", border: "transparent" },
+        { label: "Ready=" + (crash || pending ? "False" : "True"), reason: crash || pending ? "ContainersNotReady" : "", bg: crash || pending ? "color-mix(in oklch, var(--destructive) 10%, transparent)" : "var(--secondary)", color: crash || pending ? "var(--destructive)" : "var(--secondary-foreground)", border: "transparent" },
+        { label: "ContainersReady=" + (crash || pending ? "False" : "True"), reason: crash || pending ? "ContainersNotReady" : "", bg: crash || pending ? "color-mix(in oklch, var(--destructive) 10%, transparent)" : "var(--secondary)", color: crash || pending ? "var(--destructive)" : "var(--secondary-foreground)", border: "transparent" },
+        { label: "PodScheduled=" + (pending ? "False" : "True"), reason: pending ? "Unschedulable" : "", bg: pending ? "color-mix(in oklch, var(--highlight) 15%, transparent)" : "var(--secondary)", color: pending ? "var(--badge-hl-fg)" : "var(--secondary-foreground)", border: "transparent" },
+      ],
+      events: (crash ? [
+        { type: "Warning", reason: "BackOff", count: "×214", message: "Back-off restarting failed container payments-api in pod " + pod.name + "_payments(52ad9c34)", age: "2m" },
+        { type: "Normal", reason: "Pulled", count: "×215", message: "Container image \"" + pod.image + "\" already present on machine", age: "2m" },
+        { type: "Warning", reason: "Unhealthy", count: "×38", message: "Readiness probe failed: Get \"http://10.244.2.17:8080/healthz\": dial tcp 10.244.2.17:8080: connect: connection refused", age: "7m" },
+      ] : pending ? [
+        { type: "Warning", reason: "FailedScheduling", count: "×4", message: "0/3 nodes are available: 3 Insufficient cpu. preemption: 0/3 nodes are available: 3 No preemption victims found for incoming pod.", age: "1m" },
+      ] : [
+        { type: "Normal", reason: "Started", count: "", message: "Started container " + pod.app, age: pod.age },
+        { type: "Normal", reason: "Pulled", count: "", message: "Container image \"" + pod.image + "\" already present on machine", age: pod.age },
+      ]).map((e) => Object.assign({}, e, { toneBg: evTone(e.type).bg, toneColor: evTone(e.type).color, badgeBorder: evTone(e.type).border, divider: "var(--border)" })),
+      nsFields: [
+        { label: "Status", value: "Active", font: "inherit", color: "var(--foreground)" },
+        { label: "Age", value: "21d", font: "'Geist Mono',monospace", color: "var(--foreground)" },
+        { label: "Pods", value: "4 — 3 running, 1 failing", font: "inherit", color: "var(--foreground)" },
+        { label: "Services", value: "3", font: "'Geist Mono',monospace", color: "var(--foreground)" },
+        { label: "Workloads", value: "3 Deployments · 1 CronJob", font: "inherit", color: "var(--foreground)" },
+      ],
+      nsLabels: ["env=dev", "team=payments", "pod-security.kubernetes.io/enforce=baseline"],
+      showQuotas: this.props.quotaBars ?? true,
+      quotas: [
+        { name: "requests.cpu", used: "1.2", hard: "4", pct: "30%" },
+        { name: "requests.memory", used: "2.1Gi", hard: "8Gi", pct: "26%" },
+      ],
+      nsPodCount: nsPods.length + " pods",
+      nsPods: nsPods.map((p) => this.podRow(p, nav)),
+      openNsDialog: () => set({ dlgOpen: true, dlgKind: "ns", typed: "" }),
+      openPodDialog: () => set({ dlgOpen: true, dlgKind: "pod", typed: "" }),
+      closeDialog: () => set({ dlgOpen: false }),
+      dlgOpen: s.dlgOpen,
+      dlgIsNs: isNsDlg,
+      dlgTitle: isNsDlg ? "Delete namespace payments?" : "Delete Pod " + pod.name + "?",
+      dlgDescription: isNsDlg ? "This permanently deletes the namespace and every resource inside it. This cannot be undone." : "This permanently deletes the Pod in namespace " + pod.ns + ". Its controller may recreate it. This cannot be undone.",
+      dlgConfirmText: confirmText,
+      dlgConfirmLabel: isNsDlg ? "Delete namespace" : "Delete",
+      typed: s.typed,
+      onTyped: (e) => set({ typed: e.target.value }),
+      deleteDisabled: !canDelete,
+      deleteOpacity: canDelete ? 1 : 0.5,
+      deletePointer: canDelete ? "auto" : "none",
+      confirmDelete: () => nav("overview"),
+    };
+  }
+}
+</script>
+</body>
+</html>

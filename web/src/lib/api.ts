@@ -111,6 +111,44 @@ export interface Overview {
   namespaces: string[];
 }
 
+// --- Data enhancements (ADR-0009, Story F) -----------------------------------
+
+/** Summed CPU/Memory usage for one pod (metrics-server). */
+export interface PodMetrics {
+  name: string;
+  namespace: string;
+  cpu: string; // millicores, e.g. "71m"
+  memory: string; // binary, e.g. "306Mi"
+}
+
+/** Pod metrics plus whether metrics-server was reachable (false ⇒ render "—"). */
+export interface PodMetricsResponse {
+  available: boolean;
+  items: PodMetrics[];
+}
+
+/** Per-resource-type counts for the sidebar, keyed "group/version/resource"
+ *  (raw group, "" for core — the same key discovery-nav builds). */
+export interface CountsResponse {
+  counts: Record<string, number>;
+  /** At least one type could not be counted (render it without a count). */
+  partial: boolean;
+}
+
+/** One used/hard pair within a namespace ResourceQuota. `percent` (0–100) is
+ *  computed server-side so the bar never parses mixed units. */
+export interface QuotaEntry {
+  quotaName: string;
+  resource: string;
+  used: string;
+  hard: string;
+  percent: number;
+}
+
+export interface QuotasResponse {
+  items: QuotaEntry[];
+}
+
 /** One resource type the active cluster serves (core kind or CRD). */
 export interface APIResourceInfo {
   group: string;
@@ -581,6 +619,20 @@ export const api = {
   namespaces: {
     list: async (): Promise<string[]> =>
       (await request<NamespaceListResponse>("/api/v1/namespaces")).items,
+    /** ResourceQuota bars for a namespace (ADR-0009); empty when none exist. */
+    quotas: async (namespace: string): Promise<QuotaEntry[]> =>
+      (
+        await request<QuotasResponse>(
+          `/api/v1/namespaces/${encodeURIComponent(namespace)}/quotas`,
+        )
+      ).items,
+  },
+  /** Per-type resource counts for the sidebar (ADR-0009); best-effort/partial. */
+  counts: async (): Promise<CountsResponse> => request<CountsResponse>("/api/v1/counts"),
+  /** Pod CPU/Memory from metrics-server (ADR-0009). `available:false` ⇒ render "—". */
+  metrics: {
+    pods: async (namespace?: string): Promise<PodMetricsResponse> =>
+      request<PodMetricsResponse>(`/api/v1/metrics/pods${nsQuery(namespace)}`),
   },
   resources: {
     discovery: async (refresh = false): Promise<Discovery> =>

@@ -1,4 +1,5 @@
 import type { ContextHealth } from "@/lib/api";
+import type { StatusTone } from "@/lib/workload-status";
 
 export type BadgeState = {
   label: string;
@@ -33,4 +34,18 @@ export function healthBadge(
     variant: "destructive",
     title: health.guidance || health.error || "Cluster unreachable",
   };
+}
+
+/** Maps a per-context probe to a Dusk tone for the switcher pill and the active-
+ *  context status dot: Healthy→ok (teal), Unreachable/Auth error→warn (red),
+ *  Checking→neutral. Reuses the shared badge copy/title so the label stays in
+ *  one place. */
+export function healthTone(
+  health: ContextHealth | undefined,
+  pending: boolean,
+): { tone: StatusTone; label: string; title: string } {
+  const b = healthBadge(health, pending);
+  const tone: StatusTone =
+    b.variant === "default" ? "ok" : b.variant === "destructive" ? "warn" : "neutral";
+  return { tone, label: b.label, title: b.title };
 }

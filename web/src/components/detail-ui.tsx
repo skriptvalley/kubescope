@@ -21,9 +21,9 @@ export function DetailField({
   const content = children ?? value;
   const empty = content === undefined || content === null || content === "";
   return (
-    <div>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 break-all text-sm font-medium">{empty ? "—" : content}</dd>
+    <div className="min-w-0">
+      <dt className="text-[11.5px] font-medium text-muted-foreground">{label}</dt>
+      <dd className="mt-[3px] break-all text-[13px] font-medium">{empty ? "—" : content}</dd>
     </div>
   );
 }
@@ -42,7 +42,7 @@ export function DetailSection({
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">{title}</h3>
+        <h3 className="font-display text-sm font-medium">{title}</h3>
         {action}
       </div>
       {children}
@@ -50,9 +50,16 @@ export function DetailSection({
   );
 }
 
-/** A responsive `dl` grid for DetailField children. */
+/** A responsive `dl` grid for DetailField children, carded with a Dusk ring. */
 export function DetailGrid({ children }: { children: ReactNode }) {
-  return <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">{children}</dl>;
+  return (
+    <dl
+      className="m-0 grid gap-3 rounded-lg bg-card p-4 shadow-ring"
+      style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}
+    >
+      {children}
+    </dl>
+  );
 }
 
 /** Renders a label/selector map as `k=v` badges, or a "None" note when empty. */
@@ -60,9 +67,9 @@ export function LabelBadges({ pairs }: { pairs: Record<string, string> | undefin
   const entries = Object.entries(pairs ?? {}).sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) return <p className="text-sm text-muted-foreground">None</p>;
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-1.5">
       {entries.map(([k, v]) => (
-        <Badge key={k} variant="secondary" className="font-normal">
+        <Badge key={k} variant="secondary" className="font-mono text-[11.5px] font-normal">
           {k}={v}
         </Badge>
       ))}

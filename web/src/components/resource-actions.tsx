@@ -1,5 +1,5 @@
 import { RotateCw, Scale as ScaleIcon, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -18,8 +18,19 @@ import type { ResourceRef } from "@/lib/api";
 // call regardless, ADR-0005).
 
 /** Delete button + typed-name confirmation. On success navigates to the kind's
- *  list, since the object being viewed no longer exists. */
-export function DeleteResourceButton({ refx, kind }: { refx: ResourceRef; kind: string }) {
+ *  list, since the object being viewed no longer exists. `cascade` supplies the
+ *  optional destructive-tinted warning box (namespace deletes). */
+export function DeleteResourceButton({
+  refx,
+  kind,
+  label = "Delete",
+  cascade,
+}: {
+  refx: ResourceRef;
+  kind: string;
+  label?: string;
+  cascade?: ReactNode;
+}) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const del = useDeleteResource(refx, () =>
@@ -28,8 +39,14 @@ export function DeleteResourceButton({ refx, kind }: { refx: ResourceRef; kind: 
 
   return (
     <>
-      <Button variant="destructive" size="sm" onClick={() => setOpen(true)}>
-        <Trash2 /> Delete
+      {/* Dusk: tinted destructive control, not a solid red button. */}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="bg-destructive/10 text-destructive hover:bg-destructive/20"
+        onClick={() => setOpen(true)}
+      >
+        <Trash2 /> {label}
       </Button>
       <ConfirmDialog
         open={open}
@@ -41,9 +58,10 @@ export function DeleteResourceButton({ refx, kind }: { refx: ResourceRef; kind: 
             {refx.namespace ? ` in namespace ${refx.namespace}` : ""}. This cannot be undone.
           </>
         }
+        cascade={cascade}
         confirmText={refx.name}
         confirmTextLabel={`Type the ${kind.toLowerCase()} name to confirm`}
-        confirmLabel="Delete"
+        confirmLabel={label}
         pending={del.isPending}
         error={del.error}
         onConfirm={() => del.mutate()}

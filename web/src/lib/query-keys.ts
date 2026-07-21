@@ -37,6 +37,10 @@ export const clusterScopedKeyPrefixes = [
   ["workload-summary"],
   ["events-feed"],
   ["service-detail"],
+  // Data enhancements (ADR-0009) — all per-cluster reads.
+  ["counts"],
+  ["metrics"],
+  ["quotas"],
   // Search results are context-specific (they name objects in the active
   // cluster), so drop them on a context switch.
   ["search"],

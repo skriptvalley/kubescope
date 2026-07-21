@@ -1,6 +1,6 @@
-import { Trash2 } from "lucide-react";
+import { ChevronRight, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 
 import { ConfigMapDetail } from "@/components/configmap-detail";
 import { ControllerDetail } from "@/components/controller-detail";
@@ -10,10 +10,12 @@ import { ExecTerminal } from "@/components/exec-terminal";
 import { IngressDetail } from "@/components/ingress-detail";
 import { LiveBadge } from "@/components/live-badge";
 import { LogViewer } from "@/components/log-viewer";
+import { NamespaceDetail } from "@/components/namespace-detail";
 import { PodDetail } from "@/components/pod-detail";
 import { BindingDetail, RoleDetail, ServiceAccountDetail } from "@/components/rbac-detail";
 import { SecretDetail } from "@/components/secret-detail";
 import { ServiceDetail } from "@/components/service-detail";
+import { StatusBadge } from "@/components/status-badge";
 import {
   PersistentVolumeClaimDetail,
   PersistentVolumeDetail,
@@ -22,21 +24,16 @@ import {
 import { YamlTab } from "@/components/yaml-tab";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useReadOnly } from "@/hooks/use-config";
 import { useLiveResourceObject } from "@/hooks/use-stream";
 import { formatAge } from "@/lib/age";
 import { type KubeObject } from "@/lib/api";
+import { podDisplayStatus, type PodStatusObject } from "@/lib/pod-status";
 import { detailKind, isSecret as isSecretRef } from "@/lib/resource-views";
 import { cn } from "@/lib/utils";
 import { workloadKind } from "@/lib/workloads";
+import { podStatusTone, type StatusTone } from "@/lib/workload-status";
 
 type Tab = "summary" | "logs" | "terminal" | "yaml";
 
@@ -61,96 +58,167 @@ export function ResourceDetailPage() {
   const object = useLiveResourceObject(ref, !workload?.controller);
 
   const kind = workload?.kind ?? object.data?.kind ?? resource;
+  const isNamespace = detail === "namespace";
+  const listRoute = `/resources/${group}/${version}/${resource}`;
+  const kindPlural = resource.charAt(0).toUpperCase() + resource.slice(1);
+  const headerBadge = deriveHeaderBadge(isPod, isNamespace, object.data);
 
   return (
-    <Card>
-      <CardHeader className="space-y-1.5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1.5">
-            <CardTitle className="break-all">{name}</CardTitle>
-            <CardDescription>
-              {kind} · {group === "core" ? "core" : group}/{version}
-              {namespace ? ` · namespace ${namespace}` : ""}
-            </CardDescription>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {!workload?.controller && <LiveBadge status={object.streamStatus} className="mt-1" />}
-            {!readOnly && <DeleteResourceButton refx={ref} kind={kind} />}
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {object.deleted && (
-          <Alert variant="destructive">
-            <Trash2 className="h-4 w-4" />
-            <AlertTitle>Object deleted</AlertTitle>
-            <AlertDescription>
-              This {kind} has been deleted from the cluster. The details below are the last known state.
-            </AlertDescription>
-          </Alert>
+    <div className="flex flex-col gap-3.5">
+      <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+        <Link to={listRoute} className="text-muted-foreground no-underline hover:text-primary hover:underline">
+          {kindPlural}
+        </Link>
+        {namespace && (
+          <>
+            <ChevronRight className="h-3 w-3 opacity-50" />
+            <Link
+              to={`/resources/core/v1/namespaces/${encodeURIComponent(namespace)}`}
+              className="text-muted-foreground no-underline hover:text-primary hover:underline"
+            >
+              {namespace}
+            </Link>
+          </>
         )}
+        <ChevronRight className="h-3 w-3 opacity-50" />
+        <span className="font-mono text-xs text-foreground">{name}</span>
+      </nav>
 
-        <div className="flex gap-1 border-b" role="tablist" aria-label="Object views">
-          <TabButton active={tab === "summary"} onClick={() => setTab("summary")}>
-            Summary
-          </TabButton>
-          {isPod && (
-            <TabButton active={tab === "logs"} onClick={() => setTab("logs")}>
-              Logs
-            </TabButton>
-          )}
-          {isPod && (
-            <TabButton active={tab === "terminal"} onClick={() => setTab("terminal")}>
-              Terminal
-            </TabButton>
-          )}
-          <TabButton active={tab === "yaml"} onClick={() => setTab("yaml")}>
-            YAML
-          </TabButton>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="break-all font-display text-[19px] font-semibold tracking-[-0.02em]">{name}</h1>
+            {headerBadge && (
+              <StatusBadge tone={headerBadge.tone} dot>
+                {headerBadge.label}
+              </StatusBadge>
+            )}
+          </div>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            {kind} · {group === "core" ? "core" : group}/{version}
+            {namespace && (
+              <>
+                {" · namespace "}
+                <Link
+                  to={`/resources/core/v1/namespaces/${encodeURIComponent(namespace)}`}
+                  className="text-primary hover:underline"
+                >
+                  {namespace}
+                </Link>
+              </>
+            )}
+          </p>
         </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {!workload?.controller && <LiveBadge status={object.streamStatus} />}
+          {!readOnly && (
+            <DeleteResourceButton
+              refx={ref}
+              kind={kind}
+              label={isNamespace ? "Delete namespace" : "Delete"}
+              cascade={
+                isNamespace ? (
+                  <>
+                    Everything in <span className="font-mono text-xs">{name}</span> is deleted with it —
+                    all pods, services, config maps and secrets — and finalizers may hold the namespace in
+                    Terminating.
+                  </>
+                ) : undefined
+              }
+            />
+          )}
+        </div>
+      </div>
 
-        {tab === "logs" && isPod ? (
-          <LogViewer namespace={namespace ?? ""} name={name} object={object.data} />
-        ) : tab === "terminal" && isPod ? (
-          // Exec is a read-ish capability from the UI's angle, but running
-          // commands can mutate — the server enforces read-only, so if exec is
-          // blocked the socket simply closes with an error the terminal shows.
-          <ExecTerminal namespace={namespace ?? ""} name={name} object={object.data} />
-        ) : tab === "yaml" ? (
-          // A Secret's YAML is masked, so editing it would apply the redaction
-          // marker over the real data — force the YAML tab view-only for Secrets;
-          // values are changed via the dedicated (revealed) flows, not here.
-          <YamlTab refx={ref} kind={kind} readOnly={readOnly || isSecret} />
-        ) : workload?.controller ? (
-          // Controller detail resolves its own status/pods/events; the generic
-          // object fetch is skipped here and only the YAML tab loads it lazily.
-          <ControllerDetail
-            resource={resource}
-            kind={workload.kind}
-            namespace={namespace ?? ""}
-            name={name}
-            readOnly={readOnly}
-          />
-        ) : object.isPending ? (
-          <Skeleton className="h-40 w-full" data-testid="detail-loading" />
-        ) : object.isError ? (
-          <ErrorState
-            error={object.error}
-            onRetry={() => object.refetch()}
-            title="Failed to load object"
-          />
-        ) : (
-          <TypedDetail
-            detail={detail}
-            object={object.data}
-            namespace={namespace}
-            name={name}
-            isWorkload={Boolean(workload)}
-          />
+      {object.deleted && (
+        <Alert variant="destructive">
+          <Trash2 className="h-4 w-4" />
+          <AlertTitle>Object deleted</AlertTitle>
+          <AlertDescription>
+            This {kind} has been deleted from the cluster. The details below are the last known state.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <div className="flex gap-0.5 border-b" role="tablist" aria-label="Object views">
+        <TabButton active={tab === "summary"} onClick={() => setTab("summary")}>
+          Summary
+        </TabButton>
+        {isPod && (
+          <TabButton active={tab === "logs"} onClick={() => setTab("logs")}>
+            Logs
+          </TabButton>
         )}
-      </CardContent>
-    </Card>
+        {isPod && (
+          <TabButton active={tab === "terminal"} onClick={() => setTab("terminal")}>
+            Terminal
+          </TabButton>
+        )}
+        <TabButton active={tab === "yaml"} onClick={() => setTab("yaml")}>
+          YAML
+        </TabButton>
+      </div>
+
+      {tab === "logs" && isPod ? (
+        <LogViewer namespace={namespace ?? ""} name={name} object={object.data} />
+      ) : tab === "terminal" && isPod ? (
+        // Exec is a read-ish capability from the UI's angle, but running
+        // commands can mutate — the server enforces read-only, so if exec is
+        // blocked the socket simply closes with an error the terminal shows.
+        <ExecTerminal namespace={namespace ?? ""} name={name} object={object.data} />
+      ) : tab === "yaml" ? (
+        // A Secret's YAML is masked, so editing it would apply the redaction
+        // marker over the real data — force the YAML tab view-only for Secrets;
+        // values are changed via the dedicated (revealed) flows, not here.
+        <YamlTab refx={ref} kind={kind} readOnly={readOnly || isSecret} />
+      ) : workload?.controller ? (
+        // Controller detail resolves its own status/pods/events; the generic
+        // object fetch is skipped here and only the YAML tab loads it lazily.
+        <ControllerDetail
+          resource={resource}
+          kind={workload.kind}
+          namespace={namespace ?? ""}
+          name={name}
+          readOnly={readOnly}
+        />
+      ) : object.isPending ? (
+        <Skeleton className="h-40 w-full" data-testid="detail-loading" />
+      ) : object.isError ? (
+        <ErrorState
+          error={object.error}
+          onRetry={() => object.refetch()}
+          title="Failed to load object"
+        />
+      ) : (
+        <TypedDetail
+          detail={detail}
+          object={object.data}
+          namespace={namespace}
+          name={name}
+          isWorkload={Boolean(workload)}
+        />
+      )}
+    </div>
   );
+}
+
+/** The optional header status pill: pods use the derived kubectl-ish status,
+ *  namespaces their phase; other kinds have no header badge. */
+function deriveHeaderBadge(
+  isPod: boolean,
+  isNamespace: boolean,
+  object: KubeObject | undefined,
+): { tone: StatusTone; label: string } | null {
+  if (!object) return null;
+  if (isPod) {
+    const label = podDisplayStatus(object as unknown as PodStatusObject);
+    return { tone: podStatusTone(label), label };
+  }
+  if (isNamespace) {
+    const phase = (object.status as { phase?: string } | undefined)?.phase ?? "Active";
+    return { tone: phase === "Active" ? "ok" : "progress", label: phase };
+  }
+  return null;
 }
 
 /** Routes a resolved object to its typed detail view, falling back to the Pod
@@ -170,6 +238,8 @@ function TypedDetail({
   isWorkload: boolean;
 }) {
   switch (detail) {
+    case "namespace":
+      return <NamespaceDetail object={object} name={name} />;
     case "configmap":
       return <ConfigMapDetail object={object} />;
     case "secret":
@@ -310,9 +380,9 @@ function TabButton({
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        "-mb-px border-b-2 px-3 py-1.5 text-sm transition-colors",
+        "-mb-px border-b-2 px-3 py-1.5 text-[13px] transition-colors",
         active
-          ? "border-foreground font-medium text-foreground"
+          ? "border-primary font-medium text-foreground"
           : "border-transparent text-muted-foreground hover:text-foreground",
       )}
     >
