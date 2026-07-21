@@ -4,6 +4,57 @@ All notable changes to Kubescope are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] — 2026-07-21
+
+First stable release. Kubescope now wears the skriptvalley **"Dusk"** design system
+end to end, in light and dark, on top of the complete dashboard shipped in 0.1.0.
+This is a presentation-layer redesign over the existing data layer — every route,
+hook, live-update stream, read-only guardrail, and Secret-masking path is
+unchanged — plus a theme toggle and three opt-in data enhancements (FB-11,
+ADR-0009).
+
+### Added
+
+- **skriptvalley "Dusk" design system (FB-11, ADR-0009).** Every screen restyled
+  over Tailwind + the shadcn primitives: violet primary, teal `brand`, pumpkin
+  `highlight`, cream/aubergine surfaces as **raw-OKLCH** tokens; Space Grotesk
+  headings + Geist body + Geist Mono for Kubernetes identifiers, all **self-hosted**
+  (no CDN — the offline binary bundles the fonts, ADR-0002). Cards carry a hairline
+  ring; a centralized status→tone rule drives every badge, dot, ready/restart
+  colour, and condition chip.
+- **Light / system / dark theme toggle.** A header segmented control persisted to
+  `localStorage`, with `system` following `prefers-color-scheme`; applied before
+  first paint (no flash).
+- **Cluster overview redesign.** Stat cards (Nodes / Pods / Namespaces / Health)
+  derived from real cluster state, an attention banner for failing workloads, and
+  a live-updating pods table with namespace/status/name filters.
+- **Typed namespace detail.** Fields, labels, a live pods-in-namespace table, and
+  ResourceQuota usage bars.
+- **Pod CPU / Memory (opt-in).** Read from **metrics-server** via the dynamic
+  client against `metrics.k8s.io` (no new dependency); renders `—` and never errors
+  when metrics-server is absent.
+- **Sidebar per-type counts and namespace quota bars (opt-in).** Best-effort
+  reads that degrade cleanly when unavailable.
+
+### Changed
+
+- Design tokens moved from shadcn HSL triplets to raw OKLCH, mapped in Tailwind as
+  `oklch(var(--token) / <alpha-value>)` so every opacity modifier keeps working.
+- Per-context Kubernetes client QPS/Burst raised above client-go's throttling
+  defaults, so a dashboard that fans many reads out at once (overview + counts +
+  lists) is no longer client-side throttled into multi-second waits.
+
+### Known limitations
+
+- CPU/Memory columns and per-namespace quota bars require **metrics-server** /
+  `ResourceQuota` objects respectively; both degrade gracefully when absent.
+- The GHCR package visibility follow-up (FB-10) is still open: until it is made
+  public, the anonymous `docker run ghcr.io/skriptvalley/kubescope:1.0.0` pull
+  requires authentication.
+- exec-plugin clusters (EKS/GKE) and file-path-cert kubeconfigs still need the
+  documented extra steps inside the container (ADR-0004); OIDC auth,
+  multi-user/hashed credentials, and an in-cluster Helm chart remain deferred.
+
 ## [0.1.0] — 2026-07-17
 
 First tagged release: a self-hostable, single-container Kubernetes dashboard that
@@ -89,4 +140,5 @@ the post-sprint connectivity, kubeconfig-source, and onboarding hardening rounds
 - OIDC auth, multi-user/hashed credentials, and an in-cluster Helm deployment are
   deferred to a later release.
 
+[1.0.0]: https://github.com/skriptvalley/kubescope/releases/tag/v1.0.0
 [0.1.0]: https://github.com/skriptvalley/kubescope/releases/tag/v0.1.0
