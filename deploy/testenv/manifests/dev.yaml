@@ -51,7 +51,19 @@ spec:
       - name: api
         image: busybox:1.36
         command: ["sh","-c","i=0; while true; do i=$((i+1)); echo \"[api] $(date +%T) handled request #$i status=200 pod=$(hostname)\"; sleep 2; done"]
+        # Consume the ConfigMap + Secret via BOTH env and volume so the resource
+        # graph (FB-14) has real Pod→ConfigMap and Pod→Secret edges to draw, and
+        # the service port-forward (FB-13) backend has a realistic config shape.
+        envFrom:
+        - configMapRef: { name: frontend-config }
+        - secretRef: { name: api-credentials }
+        volumeMounts:
+        - { name: config, mountPath: /etc/frontend-config, readOnly: true }
+        - { name: credentials, mountPath: /etc/api-credentials, readOnly: true }
         resources: { requests: { cpu: 5m, memory: 8Mi } }
+      volumes:
+      - { name: config, configMap: { name: frontend-config } }
+      - { name: credentials, secret: { secretName: api-credentials } }
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -68,6 +80,26 @@ type: Opaque
 stringData:
   DB_PASSWORD: "s3cr3t-dev-password"
   API_TOKEN: "tok_dev_abc123"
+---
+# A one-shot Job in `web` that consumes the api-credentials Secret — gives the
+# resource graph (FB-14) a real Job→Secret edge in the same namespace as the
+# frontend/api workloads. (The CronJob→Jobs→pods "club a series of runs" case is
+# exercised by batch/hourly-report below.)
+apiVersion: batch/v1
+kind: Job
+metadata: { name: config-sync, namespace: web, labels: { job: config-sync } }
+spec:
+  backoffLimit: 2
+  template:
+    metadata: { labels: { job: config-sync } }
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: sync
+        image: busybox:1.36
+        command: ["sh","-c","echo 'syncing config using api-credentials...'; sleep 4; echo 'config sync complete'"]
+        envFrom:
+        - secretRef: { name: api-credentials }
 ---
 # --- data namespace: a StatefulSet + headless service + a DaemonSet ---
 apiVersion: v1

@@ -1,0 +1,49 @@
+# Kubescope e2e — declarative launch (FB-12, the compose equivalent of
+# `deploy/testenv/testenv.sh run --docker`).
+#
+# It mounts a container-ready kubeconfig from ONE fixed path and serves the
+# dashboard on the host loopback. It does NO per-OS or per-cloud rewriting — a
+# prep step writes the kubeconfig to the mounted path first:
+#
+#   kind : make compose-config        # host.docker.internal-adapted testenv copy
+#   EKS  : make e2e-eks-kubeconfig     # static bearer-token kubeconfig (ADR-0010)
+#
+# then:  make compose-up   /   make compose-down
+#
+# The image is private on GHCR today (FB-10), so build it locally first:
+#   make docker-build-local
+#
+name: kubescope-e2e
+
+services:
+  kubescope:
+    image: ${KUBESCOPE_IMAGE:-ghcr.io/skriptvalley/kubescope:latest}
+    container_name: kubescope-e2e
+    # The image runs as nonroot (uid 65532). On Linux, bind mounts keep host
+    # ownership, so the container user must match the host owner of the 0600
+    # kubeconfig to read it — `make compose-up` sets KUBESCOPE_COMPOSE_USER to
+    # the host uid:gid there (mirroring `testenv.sh run --docker`). On
+    # macOS/Windows Docker Desktop remaps ownership, so the image default is kept.
+    user: "${KUBESCOPE_COMPOSE_USER:-65532:65532}"
+    # Read-only mount of the prepared kubeconfig (ADR-0004). The prep step writes
+    # build/.e2e-kubeconfig; override the source with KUBESCOPE_COMPOSE_KUBECONFIG.
+    volumes:
+      - ${KUBESCOPE_COMPOSE_KUBECONFIG:-./.e2e-kubeconfig}:/kubeconfig:ro
+    # Canonical KUBESCOPE_* env only (CLAUDE.md). Inside the container the netns
+    # is the isolation boundary, so binding 0.0.0.0 is fine — the loopback
+    # publish below is what fences it to this host (ADR-0005).
+    environment:
+      KUBESCOPE_KUBECONFIG: /kubeconfig
+      KUBESCOPE_LISTEN_ADDR: 0.0.0.0:8080
+      KUBESCOPE_READ_ONLY: ${KUBESCOPE_READ_ONLY:-false}
+      KUBESCOPE_AUTH_MODE: ${KUBESCOPE_AUTH_MODE:-none}
+    # Loopback ONLY — never a LAN interface for an unauthenticated dashboard
+    # (ADR-0005). Do not change to a bare "8080:8080".
+    ports:
+      - "127.0.0.1:8080:8080"
+    # Lets the container reach a kind apiserver via host.docker.internal on Linux
+    # Docker Engine (auto-provided on Docker Desktop; harmless there). For EKS the
+    # endpoint is a public URL, so this is unused.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: "no"

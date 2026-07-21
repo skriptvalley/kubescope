@@ -1,0 +1,6 @@
+# Container-ready kubeconfig written by the compose prep step
+# (make compose-config / make e2e-eks-kubeconfig). Holds cluster credentials —
+# never commit it. Removed by `make compose-down`. The glob also catches the
+# transient sed `.bak` copy (the pre-rewrite kubeconfig) if a prep run is
+# interrupted before it is cleaned up.
+.e2e-kubeconfig*

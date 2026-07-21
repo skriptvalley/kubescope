@@ -13,6 +13,7 @@
 #   deploy/testenv/testenv.sh status           # show clusters + workloads
 #   deploy/testenv/testenv.sh run              # build + run kubescope (native) against it
 #   deploy/testenv/testenv.sh run --docker     # ...or run the container image instead
+#   deploy/testenv/testenv.sh compose-config   # prep kubeconfig for the docker-compose flow
 #   deploy/testenv/testenv.sh check            # verify required tools are present
 #   deploy/testenv/testenv.sh check --install  # ...and install missing ones (brew)
 #
@@ -238,6 +239,43 @@ run_docker() {
   esac
 }
 
+# compose_config — write a container-ready kubeconfig to the fixed path that
+# build/docker-compose.yml mounts (build/.e2e-kubeconfig), for the kind compose
+# flow. On macOS/Windows the kind apiserver (127.0.0.1 → the container itself)
+# is rewritten to host.docker.internal (+ skip TLS verify, local dev only) so a
+# bridged container can reach it. On Linux a bridged compose can't reach a
+# 127.0.0.1 apiserver — use 'run --docker' (host networking) for kind there.
+compose_config() {
+  cluster_exists "$DEV_CLUSTER" || die "no test environment — run '$0 up' first."
+  local dst="$REPO_ROOT/build/.e2e-kubeconfig"
+  # The copy carries the kind admin cert/key — create it 0600 from the start
+  # (not just at the final chmod), so it is never briefly world-readable.
+  umask 077
+  cp "$KUBECONFIG_FILE" "$dst"
+  case "$(uname -s)" in
+    Darwin|MINGW*|MSYS*)
+      log "adapting kubeconfig for Docker (host.docker.internal, TLS verify off — local dev only)"
+      sed -i.bak \
+        -e 's#server: https://127.0.0.1:#server: https://host.docker.internal:#' \
+        -e 's#certificate-authority-data:.*#insecure-skip-tls-verify: true#' \
+        "$dst"
+      rm -f "$dst.bak"
+      ;;
+    Linux)
+      warn "Linux: a bridged docker-compose can't reach a 127.0.0.1 kind apiserver."
+      warn "For kind on Linux use 'make testenv-run-docker' (host networking); compose targets kind on macOS/Windows + EKS on any OS."
+      ;;
+  esac
+  chmod 600 "$dst"
+  ok "wrote $dst"
+  cat <<EOF
+
+Next: launch Kubescope with docker-compose:
+  make compose-up      # http://127.0.0.1:8080  (build the image first if needed: make docker-build-local)
+  make compose-down    # stop + remove the adapted kubeconfig copy
+EOF
+}
+
 print_summary() {
   cat <<EOF
 
@@ -275,6 +313,8 @@ Usage: testenv.sh <command>
                   --docker runs the container image instead (KUBESCOPE_IMAGE,
                   default ghcr.io/skriptvalley/kubescope:latest); --build first
                   rebuilds the binary (or, with --docker, the image).
+  compose-config  write a container-ready kubeconfig to build/.e2e-kubeconfig for
+                  the docker-compose flow (make compose-up); kind on macOS/Windows
   check [--install]   verify required tools are present (--install: fix via brew)
 
 Everything uses an isolated kubeconfig ($KUBECONFIG_FILE);
@@ -287,7 +327,8 @@ case "${1:-}" in
   down)   down ;;
   status) status ;;
   run)    shift; run "$@" ;;
+  compose-config) compose_config ;;
   check|preflight) shift; require_tools "${1:-}"; ok "all required tools present" ;;
   -h|--help|help|"") usage ;;
-  *) die "unknown command '$1' (try: up | down | status | run | check)" ;;
+  *) die "unknown command '$1' (try: up | down | status | run | compose-config | check)" ;;
 esac
