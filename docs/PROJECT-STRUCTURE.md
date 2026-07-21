@@ -16,7 +16,7 @@ kubescope/
 ├── build/                  # Dockerfile, docker-compose sample
 ├── deploy/                 # sample run scripts, kind config
 ├── docs/                   # PRD, architecture, plans; docs/adr/ for ADRs
-├── prompts/                # per-sprint session prompts
+├── prompts/                # session prompts — v1|v2 × sprints/feedback (see prompts/README.md)
 ├── .claude/skills/         # project skills
 ├── Makefile · CLAUDE.md · AGENTS.md · STATUS.md · README.md
 ```
@@ -36,7 +36,7 @@ kubescope/
 | `build/` | Image definition: multi-stage, multi-arch Dockerfile + compose sample. Kept out of root to separate "how it's built" from "what it is". | Sprint 0 (Story 0.5) |
 | `deploy/` | Run-time samples: run scripts, kind config for local smoke tests. Distinct from `build/`: consuming the image vs producing it. | Sprint 0 (Story 0.5) |
 | `docs/` (+ `docs/adr/`) | PRD, architecture, build plan, git model; ADRs 0001–0006 record locked decisions. | Session 0 (now) |
-| `prompts/` | One self-contained prompt per sprint session (see [../prompts/README.md](../prompts/README.md)). | Session 0 (now) |
+| `prompts/` | Self-contained session prompts, organised `v<line>/{sprints,feedback}/` (see [../prompts/README.md](../prompts/README.md)). | Session 0 (now) |
 | `.claude/skills/` | Repeated motions as skills: add-resource-view, write-adr, update-status, deploy-check. | Session 0 (now) |
 | Root files | `Makefile` (dev commands), `CLAUDE.md` (agent rules), `AGENTS.md`, `STATUS.md` (session ledger), `README.md`. | Session 0; Makefile targets go real in Sprint 0 (Story 0.5) |
 

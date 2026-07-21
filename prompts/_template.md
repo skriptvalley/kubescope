@@ -1,4 +1,4 @@
-<!-- Sprint prompt template. To instantiate: copy to prompts/sprint-<N>.md and replace every <angle-bracket> field.
+<!-- Sprint prompt template. To instantiate: copy to prompts/v<line>/sprints/sprint-<N>.md and replace every <angle-bracket> field.
 Keep the headings and their order exactly as-is; scope stories strictly to the canonical breakdown in ../docs/BUILD-PLAN.md.
 Each story gets 1-3 lines of scope + 3-6 acceptance criteria; keep the whole prompt self-contained and tight (~80-140 lines). -->
 

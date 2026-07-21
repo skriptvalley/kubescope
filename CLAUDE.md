@@ -41,7 +41,7 @@ kubescope/
 ├── build/                  # Dockerfile, docker-compose sample
 ├── deploy/                 # sample run scripts, kind config
 ├── docs/                   # PRD, architecture, plans; docs/adr/ for ADRs
-├── prompts/                # per-sprint session prompts
+├── prompts/                # session prompts — v1|v2 × sprints/feedback (see prompts/README.md)
 ├── .claude/skills/         # project skills
 ├── Makefile · CLAUDE.md · AGENTS.md · STATUS.md · README.md
 ```

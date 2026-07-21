@@ -16,7 +16,7 @@ Scope and rationale: [PRD.md](PRD.md) · Components: [ARCHITECTURE.md](ARCHITECT
 | **7 — Config/networking/RBAC/storage + polish** | Broad resource coverage + usable UX | ConfigMaps + Secrets, Services + Ingress views, RBAC, Storage, Global search + empty/error states + keyboard nav | Coverage + good empty/error states |
 | **8 — Hardening & release** | Ship v0.1.0 | Optional auth, Security pass, CI + multi-arch image publish, v0.1.0 release | Tagged v0.1.0, published multi-arch image, complete docs |
 
-Full story scope, acceptance criteria, and task checklists live in the per-sprint prompts (`prompts/sprint-0.md` … `sprint-8.md`).
+Full story scope, acceptance criteria, and task checklists live in the per-sprint prompts (`prompts/v1/sprints/sprint-0.md` … `sprint-8.md`).
 
 ## v2 backlog
 
@@ -27,5 +27,5 @@ Full story scope, acceptance criteria, and task checklists live in the per-sprin
 
 ## Execution model
 
-One sprint = one Claude Code session, driven by that sprint's prompt in `prompts/` (workflow in [../prompts/README.md](../prompts/README.md)).
+One sprint = one Claude Code session, driven by that sprint's prompt in `prompts/v1/sprints/` (prompts are organised `v<line>/{sprints,feedback}/`; workflow in [../prompts/README.md](../prompts/README.md)).
 Each session implements only its sprint's stories, updates [../STATUS.md](../STATUS.md), and opens a PR; review feedback lands in STATUS.md's "Feedback / Review Tasks" for a feedback session or the next sprint.
