@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -59,9 +60,16 @@ func PodMetricsHandler(cluster Cluster, logger *slog.Logger) http.HandlerFunc {
 			list, lerr = ri.List(r.Context(), lopts)
 		}
 		if lerr != nil {
-			// metrics-server absent or its API unavailable — advisory data, so
-			// report unavailable (the UI renders "—") rather than failing the view.
-			logger.Debug("pod metrics unavailable", "error", lerr)
+			// Metrics are advisory: whatever the failure, report unavailable (the UI
+			// renders "—") rather than breaking the view. But distinguish the
+			// expected "metrics-server not installed" (404 NotFound — quiet) from a
+			// real fault (RBAC forbidden, transient apiserver error) worth surfacing
+			// in the logs, so a genuine metrics problem isn't silently masked.
+			if apierrors.IsNotFound(lerr) {
+				logger.Debug("pod metrics unavailable (metrics API not installed)", "error", lerr)
+			} else {
+				logger.Warn("pod metrics list failed", "error", lerr)
+			}
 			writeJSON(w, logger, http.StatusOK, PodMetricsResponse{Available: false, Items: []PodMetrics{}})
 			return
 		}

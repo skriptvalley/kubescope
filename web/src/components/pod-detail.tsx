@@ -15,7 +15,7 @@ import {
 import { useReadOnly } from "@/hooks/use-config";
 import { formatAge } from "@/lib/age";
 import type { KubeObject } from "@/lib/api";
-import { restartClass } from "@/lib/tone-style";
+import { restartClass, toneStyles } from "@/lib/tone-style";
 import { cn } from "@/lib/utils";
 import { routeForKind } from "@/lib/workloads";
 import { podStatusTone, type StatusTone } from "@/lib/workload-status";
@@ -219,8 +219,10 @@ export function PodDetail({
   );
 }
 
-/** A condition chip: True → secondary, False → destructive tint (reason in the
- *  title), matching the Dusk conditions row. */
+/** A condition chip (reason in the title). True → secondary; PodScheduled=False
+ *  is a transitional/pending state → highlight (pumpkin); any other False/Unknown
+ *  → destructive. Routes non-True through the centralized tone map so it matches
+ *  the Dusk conditions row without duplicating the tint classes. */
 function ConditionChip({
   type,
   status,
@@ -230,18 +232,24 @@ function ConditionChip({
   status?: string;
   reason?: string;
 }) {
-  const ok = status === "True";
   return (
     <span
       title={reason || undefined}
       className={cn(
         "inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-medium",
-        ok ? "bg-secondary text-secondary-foreground" : "bg-destructive/10 text-destructive",
+        conditionPill(type, status),
       )}
     >
       {type}={status}
     </span>
   );
+}
+
+/** Tint classes for a pod condition chip (see ConditionChip). */
+function conditionPill(type?: string, status?: string): string {
+  if (status === "True") return "bg-secondary text-secondary-foreground";
+  if (type === "PodScheduled") return toneStyles.progress.pill; // Unschedulable = pending
+  return toneStyles.warn.pill;
 }
 
 /** Renders a container's current state as a toned label (waiting/running/

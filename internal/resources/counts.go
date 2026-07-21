@@ -76,11 +76,17 @@ func CountsHandler(svc *DiscoveryService, cluster Cluster, logger *slog.Logger) 
 			go func(t target) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				n, ok := countResource(r.Context(), dyn.Resource(t.gvr))
+				n, ok, exact := countResource(r.Context(), dyn.Resource(t.gvr))
 				mu.Lock()
 				defer mu.Unlock()
 				if ok {
 					counts[t.key] = n
+					// A count that hit the pagination cap is a floor, not exact —
+					// record it but mark the response partial so the UI can't read
+					// the floor as authoritative.
+					if !exact {
+						partial = true
+					}
 				} else {
 					partial = true
 				}
@@ -94,23 +100,27 @@ func CountsHandler(svc *DiscoveryService, cluster Cluster, logger *slog.Logger) 
 
 // countResource counts a resource cluster-wide. It lists a small page and reads
 // the server's RemainingItemCount when present (O(1) payload); otherwise it
-// paginates up to countMaxPages and sums. Any list error yields (0, false).
-func countResource(ctx context.Context, ri resourceLister) (int, bool) {
+// paginates up to countMaxPages and sums. Returns (count, ok, exact): a list
+// error yields (0, false, false); an accurate count (via RemainingItemCount or a
+// fully-walked list) is (n, true, true); hitting the pagination cap yields a
+// floor (total, true, false) so the caller can mark it partial rather than
+// treating the floor as authoritative.
+func countResource(ctx context.Context, ri resourceLister) (count int, ok, exact bool) {
 	total := 0
 	cont := ""
 	for page := 0; page < countMaxPages; page++ {
 		list, err := ri.List(ctx, metav1.ListOptions{Limit: countPageLimit, Continue: cont})
 		if err != nil {
-			return 0, false
+			return 0, false, false
 		}
 		total += len(list.Items)
 		if rc := list.GetRemainingItemCount(); rc != nil {
-			return total + int(*rc), true
+			return total + int(*rc), true, true
 		}
 		cont = list.GetContinue()
 		if cont == "" {
-			return total, true
+			return total, true, true
 		}
 	}
-	return total, true
+	return total, true, false // hit the page cap — a floor, not an exact count
 }

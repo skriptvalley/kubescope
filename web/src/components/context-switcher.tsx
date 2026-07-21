@@ -8,23 +8,10 @@ import {
   useSwitchContext,
 } from "@/hooks/use-contexts";
 import { useSetupState } from "@/hooks/use-setup";
-import { ApiError, type ContextHealth } from "@/lib/api";
-import { healthBadge } from "@/lib/context-health";
+import { ApiError } from "@/lib/api";
+import { healthTone } from "@/lib/context-health";
 import { toneStyles } from "@/lib/tone-style";
 import { cn } from "@/lib/utils";
-import type { StatusTone } from "@/lib/workload-status";
-
-/** Maps a per-context probe to a Dusk tone: Healthy→ok (teal), Unreachable/Auth
- *  error→warn (red), Checking→neutral. Reuses the shared badge copy/title. */
-function healthTone(
-  health: ContextHealth | undefined,
-  pending: boolean,
-): { tone: StatusTone; label: string; title: string } {
-  const b = healthBadge(health, pending);
-  const tone: StatusTone =
-    b.variant === "default" ? "ok" : b.variant === "destructive" ? "warn" : "neutral";
-  return { tone, label: b.label, title: b.title };
-}
 
 export function ContextSwitcher() {
   const [open, setOpen] = useState(false);

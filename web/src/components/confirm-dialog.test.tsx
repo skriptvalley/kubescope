@@ -67,4 +67,27 @@ describe("ConfirmDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalledOnce();
   });
+
+  it("renders the cascade warning slot when provided (namespace delete)", () => {
+    render(
+      <ConfirmDialog
+        open
+        destructive
+        title="Delete Namespace payments?"
+        cascade={<>Everything in payments is deleted with it — all pods, services, config maps and secrets.</>}
+        confirmText="payments"
+        confirmLabel="Delete namespace"
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByText(/everything in payments is deleted with it/i)).toBeInTheDocument();
+    // The typed-name gate still guards the destructive action.
+    expect(screen.getByRole("button", { name: "Delete namespace" })).toBeDisabled();
+  });
+
+  it("omits the cascade box when no cascade is passed", () => {
+    render(<ConfirmDialog open title="Delete Pod web-1?" confirmText="web-1" onConfirm={() => {}} onCancel={() => {}} />);
+    expect(screen.queryByText(/deleted with it/i)).toBeNull();
+  });
 });

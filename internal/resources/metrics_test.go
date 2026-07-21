@@ -1,12 +1,76 @@
 package resources
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
+
+func TestPodMetricsHandler(t *testing.T) {
+	listKinds := map[schema.GroupVersionResource]string{podMetricsGVR: "PodMetricsList"}
+
+	t.Run("degrades to unavailable (200) when the metrics API errors", func(t *testing.T) {
+		dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds)
+		// Simulate metrics-server absent: the metrics API list 404s.
+		dc.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "metrics.k8s.io", Resource: "pods"}, "")
+		})
+		rec := httptest.NewRecorder()
+		PodMetricsHandler(&fakeCluster{dynamic: dc}, discardLogger())(
+			rec, httptest.NewRequest(http.MethodGet, "/api/v1/metrics/pods", nil))
+
+		require.Equal(t, http.StatusOK, rec.Code) // never breaks the view
+		var body PodMetricsResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		assert.False(t, body.Available)
+		assert.Empty(t, body.Items)
+	})
+
+	t.Run("returns summed per-pod usage when metrics-server is present", func(t *testing.T) {
+		pm := unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "metrics.k8s.io/v1beta1",
+			"kind":       "PodMetrics",
+			"metadata":   map[string]interface{}{"name": "web-1", "namespace": "default"},
+			"containers": []interface{}{
+				map[string]interface{}{"name": "app", "usage": map[string]interface{}{"cpu": "10m", "memory": "32Mi"}},
+			},
+		}}
+		// Return the list via a reactor — the metrics kind (PodMetrics) doesn't
+		// pluralize to the "pods" resource, so the tracker won't index it under
+		// podMetricsGVR; intercepting the list call is robust and exact.
+		dc := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds)
+		dc.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+			list := &unstructured.UnstructuredList{
+				Object: map[string]interface{}{"apiVersion": "metrics.k8s.io/v1beta1", "kind": "PodMetricsList"},
+				Items:  []unstructured.Unstructured{pm},
+			}
+			return true, list, nil
+		})
+		rec := httptest.NewRecorder()
+		PodMetricsHandler(&fakeCluster{dynamic: dc}, discardLogger())(
+			rec, httptest.NewRequest(http.MethodGet, "/api/v1/metrics/pods", nil))
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		var body PodMetricsResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		assert.True(t, body.Available)
+		require.Len(t, body.Items, 1)
+		assert.Equal(t, "web-1", body.Items[0].Name)
+		assert.Equal(t, "10m", body.Items[0].CPU)
+		assert.Equal(t, "32Mi", body.Items[0].Memory)
+	})
+}
 
 func TestShapePodMetrics(t *testing.T) {
 	u := &unstructured.Unstructured{Object: map[string]interface{}{

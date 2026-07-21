@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, type ContextInfo } from "@/lib/api";
 import { connectivity } from "@/lib/connectivity";
-import { healthBadge } from "@/lib/context-health";
+import { healthBadge, healthTone } from "@/lib/context-health";
 
 import { ContextSwitcher } from "./context-switcher";
 
@@ -81,6 +81,26 @@ describe("healthBadge", () => {
       false,
     );
     expect(badge.label).toBe("Unreachable");
+  });
+});
+
+describe("healthTone", () => {
+  it("maps a healthy cluster to the brand (ok) tone", () => {
+    const t = healthTone({ name: "x", reachable: true, authOK: true, serverVersion: "v1.33.0" }, false);
+    expect(t.tone).toBe("ok");
+    expect(t.label).toBe("Healthy");
+  });
+  it("maps an unreachable cluster to the destructive (warn) tone — never ok", () => {
+    const t = healthTone({ name: "x", reachable: false, authOK: false, serverVersion: "", error: "refused" }, false);
+    expect(t.tone).toBe("warn");
+    expect(t.label).toBe("Unreachable");
+  });
+  it("maps an auth failure to the destructive (warn) tone", () => {
+    const t = healthTone({ name: "x", reachable: true, authOK: false, serverVersion: "" }, false);
+    expect(t.tone).toBe("warn");
+  });
+  it("maps a pending probe to the neutral tone", () => {
+    expect(healthTone(undefined, true).tone).toBe("neutral");
   });
 });
 
