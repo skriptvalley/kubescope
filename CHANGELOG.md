@@ -4,6 +4,21 @@ All notable changes to Kubescope are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Shutdown no longer hangs with a browser tab open (FB-16).** `SIGTERM` used to
+  block for the full 10-second drain and then exit `1` with
+  `graceful shutdown: context deadline exceeded`, holding the listener bound the
+  whole time: `http.Server.Shutdown` waits for active requests, and an SSE stream
+  (a live list's watch feed, or a followed pod log) is a request that ends only
+  when the client goes away. The streaming routes now cancel on a shutdown drain
+  signal and return immediately, so the server exits as soon as the ordinary
+  requests finish. In-flight non-streaming requests are still allowed to complete,
+  and a drain that overruns the deadline is logged as a warning rather than turned
+  into a non-zero exit — the process is terminating on request either way.
+
 ## [1.0.0] — 2026-07-21
 
 First stable release. Kubescope now wears the skriptvalley **"Dusk"** design system

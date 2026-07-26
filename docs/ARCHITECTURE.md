@@ -62,6 +62,8 @@ flowchart LR
 4. Log lines are copied into SSE events as they arrive.
 5. Client disconnect cancels the request context, closing the upstream stream. Same bridge pattern serves informer watch events for live lists.
 
+An SSE stream is one long-lived HTTP request, and `http.Server.Shutdown` waits for active requests — so on SIGTERM the streaming routes are cancelled through a drain signal (`server.Options.Drain`, fired from `RegisterOnShutdown`) and return immediately, instead of holding shutdown open until its timeout. Ordinary API requests are left to finish normally, so an in-flight mutation is never cut short. Overrunning the drain deadline is logged as a warning, not a non-zero exit: termination was requested and every session is torn down regardless.
+
 ### 3. Exec into a pod (WebSocket ⇆ SPDY)
 
 ```mermaid

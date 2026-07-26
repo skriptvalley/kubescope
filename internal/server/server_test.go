@@ -24,6 +24,7 @@ import (
 // fakeProvider satisfies resources.Cluster for router-level tests.
 type fakeProvider struct {
 	clientset kubernetes.Interface
+	dynamic   dynamic.Interface
 	err       error
 }
 
@@ -43,7 +44,11 @@ func (f *fakeProvider) ProbeAll(context.Context) ([]kube.ContextHealth, error) {
 
 func (f *fakeProvider) ExecGuidance(string) string { return "" }
 
-func (f *fakeProvider) Dynamic() (dynamic.Interface, error) { return nil, f.err }
+func (f *fakeProvider) Dynamic() (dynamic.Interface, error) { return f.dynamic, f.err }
+
+// DynamicFor completes stream.Cluster, so a test can wire Options.Stream and
+// exercise the real SSE routes through the router.
+func (f *fakeProvider) DynamicFor(string) (dynamic.Interface, error) { return f.dynamic, f.err }
 
 func (f *fakeProvider) DiscoveryFor(string) (discovery.DiscoveryInterface, error) {
 	if f.clientset == nil {
