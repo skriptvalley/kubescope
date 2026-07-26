@@ -416,6 +416,83 @@ export interface ServiceDetail {
   notReadyAddresses: EndpointAddressSummary[];
 }
 
+// --- Resource relationship graph (FB-14, ADR-0011) ---------------------------
+// A bounded, namespace-scoped topology around one focus object. The backend does
+// every traversal and every bound; the frontend maps this DTO to Cytoscape
+// elements and renders it.
+
+/** What an edge expresses. The view styles edges by relation. */
+export type GraphRelation =
+  | "owns"
+  | "routes"
+  | "mounts"
+  | "env"
+  | "imagePullSecret"
+  | "claims"
+  | "serviceAccount"
+  | "scales";
+
+/** Identifies the object behind a node, enough to deep-link to its detail route
+ *  (`group` is the raw API group — tokenize it with groupToken()). */
+export interface GraphRef {
+  group: string;
+  version: string;
+  resource: string;
+  kind: string;
+  namespace?: string;
+  name: string;
+}
+
+export interface GraphNode extends GraphRef {
+  id: string;
+  /** Compact, kind-appropriate status ("Running", "2/3", "Bound"); tone is
+   *  derived client-side by the centralized classifier (ADR-0009). */
+  status?: string;
+  /** Hops from the focus object (the focus itself is 0). */
+  depth: number;
+  focus?: boolean;
+  /** Id of the compound group this node renders inside, if any. */
+  parent?: string;
+  /** A clubbed stand-in for `count` sibling objects (a run series, or a fan-out
+   *  past the cap). Aggregates carry no name and are not navigable. */
+  aggregate?: boolean;
+  count?: number;
+  /** A referenced object that does not exist in the cluster. */
+  missing?: boolean;
+}
+
+export interface GraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  relation: GraphRelation;
+  /** The mechanism behind the edge ("volume, envFrom", "ready", "selector"). */
+  label?: string;
+}
+
+/** A compound parent: the box a workload's own nodes render inside. */
+export interface GraphGroup {
+  id: string;
+  label: string;
+  kind: string;
+  /** Node id of the controller the box was built around. */
+  root: string;
+}
+
+export interface ResourceGraph {
+  namespace: string;
+  focus: GraphRef;
+  /** The depth actually used (a request above the maximum is clamped). */
+  depth: number;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  groups: GraphGroup[];
+  /** A bound bit — node cap, fan-out cap, truncated list, clamped depth or an
+   *  unreadable relation type. `notes` says which; nothing is dropped silently. */
+  partial: boolean;
+  notes?: string[];
+}
+
 // --- Global search (Sprint 7) ------------------------------------------------
 
 /** One name match. `group` is the raw API group ("" for core); tokenize it with
@@ -635,6 +712,19 @@ export const api = {
   },
   /** Per-type resource counts for the sidebar (ADR-0009); best-effort/partial. */
   counts: async (): Promise<CountsResponse> => request<CountsResponse>("/api/v1/counts"),
+  /** The relationship graph around one object (FB-14). Namespace-scoped, focus
+   *  + depth-N; omitting depth takes the server's small default. */
+  graph: async (
+    namespace: string,
+    focus: { kind: string; name: string },
+    depth?: number,
+  ): Promise<ResourceGraph> => {
+    const params = new URLSearchParams({ focus: `${focus.kind}/${focus.name}` });
+    if (depth !== undefined) params.set("depth", String(depth));
+    return request<ResourceGraph>(
+      `/api/v1/namespaces/${encodeURIComponent(namespace)}/graph?${params.toString()}`,
+    );
+  },
   /** Pod CPU/Memory from metrics-server (ADR-0009). `available:false` ⇒ render "—". */
   metrics: {
     pods: async (namespace?: string): Promise<PodMetricsResponse> =>

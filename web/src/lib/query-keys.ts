@@ -18,6 +18,8 @@ export const queryKeys = {
   portForwards: () => ["port-forwards"] as const,
   serviceDetail: (namespace: string, name: string) =>
     ["service-detail", namespace, name] as const,
+  resourceGraph: (namespace: string, kind: string, name: string, depth: number) =>
+    ["resource-graph", namespace, kind, name, depth] as const,
   search: (query: string) => ["search", query] as const,
   // Registry-scoped (not cluster-scoped): the kubeconfig source registry is
   // shared across contexts, so it is NOT dropped on a context switch.
@@ -37,6 +39,8 @@ export const clusterScopedKeyPrefixes = [
   ["workload-summary"],
   ["events-feed"],
   ["service-detail"],
+  // The graph names objects in the active cluster (FB-14).
+  ["resource-graph"],
   // Data enhancements (ADR-0009) — all per-cluster reads.
   ["counts"],
   ["metrics"],

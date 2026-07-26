@@ -132,6 +132,11 @@ func New(opts Options) http.Handler {
 			v1.Get("/namespaces", resources.NamespacesHandler(opts.Kube, opts.Logger))
 			// Namespace ResourceQuota bars (ADR-0009); an empty list is a normal 200.
 			v1.Get("/namespaces/{namespace}/quotas", resources.NamespaceQuotasHandler(opts.Kube, opts.Logger))
+			// Resource relationship graph (FB-14, ADR-0011): namespace-scoped,
+			// focus + depth-N. Shares the discovery cache so the traversal
+			// resolves exactly the types the rest of the engine serves, CRDs
+			// included. A read, so it is not gated by read-only mode.
+			v1.Get("/namespaces/{namespace}/graph", resources.GraphHandler(disco, opts.Kube, opts.Logger))
 			v1.Get("/discovery", resources.DiscoveryHandler(disco, opts.Kube, opts.Logger))
 			// Per-type sidebar counts (ADR-0009): best-effort, shares the discovery
 			// cache so it counts exactly the resources the nav shows.

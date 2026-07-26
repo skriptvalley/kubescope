@@ -101,6 +101,16 @@ A forward that dies on its own (pod deleted mid-forward) is dropped from the reg
 
 Service targets resolve their ready endpoints once, at start, through `resources.ResolveServiceBackends` — the same Endpoints read that backs the Service detail view, which also resolves a named `targetPort` per pod. Balancing is **per-connection** (kube-proxy granularity), not per-request; endpoint churn after start is not tracked. Rationale, the 64-backend cap and the deferred churn-tracking follow-up are in the [adr/0006 FB-13 addendum](adr/0006-live-updates-sse-and-streaming-websocket.md).
 
+### 5. Resource relationship graph (FB-14)
+
+`GET /api/v1/namespaces/{namespace}/graph?focus=<kind>/<name>&depth=<N>` returns a typed `{nodes, edges, groups}` DTO the SPA renders with Cytoscape.js + fcose ([adr/0011](adr/0011-resource-graph-cytoscape-fcose.md)). A read — not gated by read-only mode.
+
+`internal/graph` walks outwards from the focus object breadth-first, entirely through the dynamic client against GVRs resolved from the shared discovery cache ([adr/0003](adr/0003-generic-resource-access-via-discovery-and-dynamic-client.md)), so a CRD focus — or a custom controller owning core objects through `ownerReferences` — traverses like a built-in kind. Relations derived: ownerReferences both ways (Deployment→ReplicaSet→Pod, CronJob→Job→Pod), Service⇄Pod (EndpointSlice, falling back to the v1 `Endpoints` object the Service detail view reads, then to `spec.selector`), Ingress→Service, Pod/Job→ConfigMap/Secret (volumes, `envFrom`, `env.valueFrom`, `imagePullSecrets`), Pod→PVC→PV, Pod→ServiceAccount, HPA→`scaleTargetRef`.
+
+Bounds: one namespace, one focus, depth default **3** / max **6** (clamped, not rejected), **150** nodes, **24** children per node, **500** objects per listed kind. A *run series* — a Job's pods, a CronJob's Jobs — clubs into one aggregated node carrying the count and an outcome tally; a controller's replicas are peers and never club on size alone. Whenever a bound bites the response sets `partial` and appends a note naming it; the view renders those notes. `groups` are compound parent boxes (a Deployment with its ReplicaSet, pods and Service inside); nodes point at theirs through `parent`.
+
+Errors reuse the engine taxonomy: `400 invalid_focus` / `invalid_depth` / `invalid_scope`, `404 unknown_resource` for a kind the cluster does not serve, and everything cluster-side through `writeEngineError` (classified 404 / 403 / 502 with remediation).
+
 ## Deployment model
 
 Single container, single process ([adr/0002](adr/0002-single-binary-embedded-spa.md)):

@@ -19,7 +19,7 @@ Key docs: [docs/PRD.md](docs/PRD.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE
 | Layer | Choices |
 |---|---|
 | Backend | Go 1.23+, chi v5, client-go (discovery API + dynamic client for generic access; typed for hot paths), slog, coder/websocket (exec), SSE (watch/logs) |
-| Frontend | React 18, TypeScript 5, Vite 5, TailwindCSS + shadcn/ui **re-themed to the skriptvalley "Dusk" design system** (raw-OKLCH tokens, light/system/dark toggle; ADR-0009), TanStack Query v5, TanStack Table v8, react-router, CodeMirror 6 (YAML, Sprint 5), xterm.js 5 (terminal, Sprint 6). Fonts self-hosted (no CDN, ADR-0002): `@fontsource/space-grotesk` + `@fontsource-variable/geist` + `@fontsource-variable/geist-mono` |
+| Frontend | React 18, TypeScript 5, Vite 5, TailwindCSS + shadcn/ui **re-themed to the skriptvalley "Dusk" design system** (raw-OKLCH tokens, light/system/dark toggle; ADR-0009), TanStack Query v5, TanStack Table v8, react-router, CodeMirror 6 (YAML, Sprint 5), xterm.js 5 (terminal, Sprint 6), **Cytoscape.js + cytoscape-fcose** (resource graph, FB-14/ADR-0011 — compound nodes; the view is `React.lazy`-split so its ~180 KB gzipped stays off first paint). Fonts self-hosted (no CDN, ADR-0002): `@fontsource/space-grotesk` + `@fontsource-variable/geist` + `@fontsource-variable/geist-mono` |
 | Packaging | Single Go binary embedding built FE via `embed.FS`; multi-stage Dockerfile; multi-arch amd64 + arm64 |
 | Testing | Go: table-driven + testify, controller-runtime envtest; FE: vitest + React Testing Library, Playwright later; kind for integration/smoke |
 
@@ -34,6 +34,7 @@ kubescope/
 │   ├── server/             # http router, SPA serving, middleware
 │   ├── kube/               # kubeconfig/context mgr, rest.Config, client caches
 │   ├── resources/          # generic (discovery+dynamic) + typed workload handlers
+│   ├── graph/              # resource relationship graph builder (ADR-0011)
 │   ├── stream/             # SSE (watch/logs) + websocket (exec)
 │   └── config/             # env config loading/validation
 ├── web/                    # React + Vite + TS app
