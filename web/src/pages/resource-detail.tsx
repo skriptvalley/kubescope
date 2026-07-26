@@ -51,7 +51,7 @@ export function ResourceDetailPage() {
   const name = params.name ?? "";
 
   const ref = { group, version, resource, namespace, name };
-  const [tab, setTab] = useState<Tab>("summary");
+  const [requestedTab, setTab] = useState<Tab>("summary");
   const readOnly = useReadOnly();
   const workload = workloadKind({ group, version, resource });
   const isPod = workload?.kind === "Pod";
@@ -63,6 +63,17 @@ export function ResourceDetailPage() {
   const object = useLiveResourceObject(ref, !workload?.controller);
 
   const kind = workload?.kind ?? object.data?.kind ?? resource;
+  // Which tabs this kind actually offers. The route can change under a mounted
+  // page — clicking a PersistentVolume in the graph, or a non-Pod from a pod's
+  // Logs tab — and the selected tab would then be one that no longer exists,
+  // leaving content on screen with no tab highlighted. Fall back to Summary.
+  const tabs: Tab[] = [
+    "summary",
+    ...(isPod ? (["logs", "terminal"] as Tab[]) : []),
+    ...(namespace ? (["graph"] as Tab[]) : []),
+    "yaml",
+  ];
+  const tab = tabs.includes(requestedTab) ? requestedTab : "summary";
   const isNamespace = detail === "namespace";
   const listRoute = `/resources/${group}/${version}/${resource}`;
   const kindPlural = resource.charAt(0).toUpperCase() + resource.slice(1);
