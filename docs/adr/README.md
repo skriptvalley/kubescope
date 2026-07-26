@@ -16,6 +16,7 @@ Decisions that lock Kubescope's technical direction. Referenced from [../ARCHITE
 | 0008 | [Kubeconfig source registry: files + directories, kubectl merge](0008-kubeconfig-source-registry.md) | Accepted | 2026-07-17 |
 | 0009 | [Adopt the skriptvalley "Dusk" design system](0009-dusk-design-system.md) | Accepted | 2026-07-21 |
 | 0010 | [EKS e2e via a host-minted static token-kubeconfig](0010-e2e-eks-static-token-kubeconfig.md) | Accepted | 2026-07-21 |
+| 0011 | [Resource relationship graph: Cytoscape.js + fcose, namespace-scoped and focus-bounded](0011-resource-graph-cytoscape-fcose.md) | Accepted | 2026-07-26 |
 
 ## Template (MADR-style)
 
