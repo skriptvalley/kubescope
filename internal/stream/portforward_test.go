@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -70,7 +71,7 @@ func (c *fakePFCluster) RestConfigFor(string) (*rest.Config, error) {
 	return &rest.Config{Host: "https://example.test"}, nil
 }
 
-func newTestPFManager(cluster *fakePFCluster, factory forwarderFactory) *PortForwardManager {
+func newTestPFManager(cluster PortForwardCluster, factory forwarderFactory) *PortForwardManager {
 	var seq int
 	return NewPortForwardManager(cluster, discardLogger(),
 		withForwarderFactory(factory),
@@ -83,7 +84,7 @@ func TestPortForwardLifecycle(t *testing.T) {
 	var created []*fakeForwarder
 	m := newTestPFManager(&fakePFCluster{ctx: "ctx-a"}, recordingFactory(&created, 15000))
 
-	pf, err := m.start(startRequest{Namespace: "default", Pod: "nginx", RemotePort: 80})
+	pf, err := m.start(context.Background(), startRequest{Namespace: "default", Pod: "nginx", RemotePort: 80})
 	require.NoError(t, err)
 	assert.Equal(t, "default", pf.Namespace)
 	assert.Equal(t, "nginx", pf.Pod)
@@ -103,7 +104,7 @@ func TestPortForwardAutoRemovesDeadForward(t *testing.T) {
 	var created []*fakeForwarder
 	m := newTestPFManager(&fakePFCluster{ctx: "ctx-a"}, recordingFactory(&created, 15000))
 
-	_, err := m.start(startRequest{Namespace: "default", Pod: "nginx", RemotePort: 80})
+	_, err := m.start(context.Background(), startRequest{Namespace: "default", Pod: "nginx", RemotePort: 80})
 	require.NoError(t, err)
 	require.Len(t, m.List(), 1)
 
@@ -128,7 +129,7 @@ func TestPortForwardReconcilesContextSwitchDuringEstablish(t *testing.T) {
 	}
 	m := newTestPFManager(cluster, factory)
 
-	_, err := m.start(startRequest{Namespace: "default", Pod: "nginx", RemotePort: 80})
+	_, err := m.start(context.Background(), startRequest{Namespace: "default", Pod: "nginx", RemotePort: 80})
 	require.Error(t, err, "start must fail when the context moved on during establish")
 	assert.Empty(t, m.List(), "the stale-context forward must not be registered")
 	require.Len(t, created, 1)
@@ -140,10 +141,10 @@ func TestPortForwardCloseOthers(t *testing.T) {
 	cluster := &fakePFCluster{ctx: "ctx-a"}
 	m := newTestPFManager(cluster, recordingFactory(&created, 15000))
 
-	a, err := m.start(startRequest{Namespace: "default", Pod: "a", RemotePort: 80})
+	a, err := m.start(context.Background(), startRequest{Namespace: "default", Pod: "a", RemotePort: 80})
 	require.NoError(t, err)
 	cluster.setContext("ctx-b")
-	b, err := m.start(startRequest{Namespace: "default", Pod: "b", RemotePort: 80})
+	b, err := m.start(context.Background(), startRequest{Namespace: "default", Pod: "b", RemotePort: 80})
 	require.NoError(t, err)
 	require.Len(t, m.List(), 2)
 
@@ -160,9 +161,9 @@ func TestPortForwardCloseOthers(t *testing.T) {
 func TestPortForwardCloseAll(t *testing.T) {
 	var created []*fakeForwarder
 	m := newTestPFManager(&fakePFCluster{ctx: "ctx-a"}, recordingFactory(&created, 15000))
-	_, err := m.start(startRequest{Namespace: "default", Pod: "a", RemotePort: 80})
+	_, err := m.start(context.Background(), startRequest{Namespace: "default", Pod: "a", RemotePort: 80})
 	require.NoError(t, err)
-	_, err = m.start(startRequest{Namespace: "default", Pod: "b", RemotePort: 81})
+	_, err = m.start(context.Background(), startRequest{Namespace: "default", Pod: "b", RemotePort: 81})
 	require.NoError(t, err)
 	require.Len(t, m.List(), 2)
 
@@ -210,7 +211,7 @@ func TestCreateHandlerSuccess(t *testing.T) {
 func TestDeleteHandler(t *testing.T) {
 	var created []*fakeForwarder
 	m := newTestPFManager(&fakePFCluster{ctx: "ctx-a"}, recordingFactory(&created, 15000))
-	pf, err := m.start(startRequest{Namespace: "default", Pod: "nginx", RemotePort: 80})
+	pf, err := m.start(context.Background(), startRequest{Namespace: "default", Pod: "nginx", RemotePort: 80})
 	require.NoError(t, err)
 
 	r := chi.NewRouter()
@@ -229,9 +230,9 @@ func TestDeleteHandler(t *testing.T) {
 func TestListHandler(t *testing.T) {
 	var created []*fakeForwarder
 	m := newTestPFManager(&fakePFCluster{ctx: "ctx-a"}, recordingFactory(&created, 15000))
-	_, err := m.start(startRequest{Namespace: "default", Pod: "a", RemotePort: 80})
+	_, err := m.start(context.Background(), startRequest{Namespace: "default", Pod: "a", RemotePort: 80})
 	require.NoError(t, err)
-	_, err = m.start(startRequest{Namespace: "default", Pod: "b", RemotePort: 81})
+	_, err = m.start(context.Background(), startRequest{Namespace: "default", Pod: "b", RemotePort: 81})
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
