@@ -33,44 +33,129 @@ export function PortForwardControls({
   object?: KubeObject;
 }) {
   const ports = declaredPorts(object);
-  const [remotePort, setRemotePort] = useState(ports[0] ? String(ports[0]) : "");
-  const [localPort, setLocalPort] = useState("");
   const start = useStartPortForward();
+
+  return (
+    <ForwardForm
+      portLabel="Pod port"
+      portListId="pod-declared-ports"
+      ports={ports}
+      initialPort={ports[0]}
+      note={
+        ports.length > 0 ? (
+          <>
+            Declared ports: <span className="font-mono">{ports.join(", ")}</span>
+          </>
+        ) : null
+      }
+      pending={start.isPending}
+      error={start.isError ? start.error : null}
+      onStart={(remotePort, localPort) => start.mutate({ namespace, pod, remotePort, localPort })}
+    />
+  );
+}
+
+/** Start-a-forward control on service detail (FB-13). One loopback listener
+ *  fronts one forward per ready endpoint pod and hands each new TCP connection
+ *  to the next one — the same per-connection granularity ClusterIP gives, not an
+ *  L7 proxy. Hidden in read-only mode by the caller; the server blocks the start
+ *  too, exactly as for a pod forward. */
+export function ServicePortForwardControls({
+  namespace,
+  service,
+  ports,
+  readyEndpoints,
+}: {
+  namespace: string;
+  service: string;
+  ports: number[];
+  readyEndpoints: number;
+}) {
+  const start = useStartPortForward();
+  const noBackends = readyEndpoints === 0;
+
+  return (
+    <ForwardForm
+      portLabel="Service port"
+      portListId="service-declared-ports"
+      ports={ports}
+      initialPort={ports[0]}
+      disabled={noBackends}
+      description={
+        noBackends
+          ? "No ready endpoints to forward to."
+          : `Port-forward (load-balanced across ${readyEndpoints} ${
+              readyEndpoints === 1 ? "endpoint" : "endpoints"
+            }) — each new connection goes to the next ready pod.`
+      }
+      pending={start.isPending}
+      error={start.isError ? start.error : null}
+      onStart={(servicePort, localPort) =>
+        start.mutate({ namespace, service, servicePort, localPort })
+      }
+    />
+  );
+}
+
+/** The shared start-a-forward form. Both targets ask the same two questions —
+ *  which remote port, and which local port (blank = auto) — and differ only in
+ *  what the remote port means. */
+function ForwardForm({
+  portLabel,
+  portListId,
+  ports,
+  initialPort,
+  description,
+  note,
+  disabled = false,
+  pending,
+  error,
+  onStart,
+}: {
+  portLabel: string;
+  portListId: string;
+  ports: number[];
+  initialPort?: number;
+  description?: string;
+  note?: React.ReactNode;
+  disabled?: boolean;
+  pending: boolean;
+  error: unknown;
+  onStart: (remotePort: number, localPort: number) => void;
+}) {
+  const [remotePort, setRemotePort] = useState(initialPort ? String(initialPort) : "");
+  const [localPort, setLocalPort] = useState("");
 
   const remote = Number(remotePort);
   const validRemote = Number.isInteger(remote) && remote >= 1 && remote <= 65535;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validRemote) return;
+    if (!validRemote || disabled) return;
     const local = localPort === "" ? 0 : Number(localPort);
-    start.mutate({
-      namespace,
-      pod,
-      remotePort: remote,
-      localPort: Number.isInteger(local) && local >= 0 && local <= 65535 ? local : 0,
-    });
+    onStart(remote, Number.isInteger(local) && local >= 0 && local <= 65535 ? local : 0);
   };
 
   return (
     <section className="space-y-2" aria-label="Port forwarding">
       <h3 className="font-display text-sm font-medium">Port forwarding</h3>
+      {description && <p className="text-[11.5px] text-muted-foreground">{description}</p>}
       <form className="flex flex-wrap items-end gap-2.5" onSubmit={submit}>
         <label className="flex flex-col gap-1">
-          <span className="text-[11.5px] font-medium text-muted-foreground">Pod port</span>
+          <span className="text-[11.5px] font-medium text-muted-foreground">{portLabel}</span>
           <input
             type="number"
             min={1}
             max={65535}
-            list="pod-declared-ports"
+            list={portListId}
             className="h-8 w-[104px] rounded-md border border-input bg-transparent px-2.5 font-mono text-[12.5px] outline-none transition-[box-shadow,border-color] focus:border-ring focus:ring-[3px] focus:ring-ring/40"
             value={remotePort}
             onChange={(e) => setRemotePort(e.target.value)}
-            aria-label="Pod port"
+            aria-label={portLabel}
             placeholder="e.g. 8080"
           />
           {ports.length > 0 && (
-            <datalist id="pod-declared-ports">
+            <datalist id={portListId}>
               {ports.map((p) => (
                 <option key={p} value={p} />
               ))}
@@ -92,20 +177,16 @@ export function PortForwardControls({
           />
         </label>
 
-        <Button type="submit" size="sm" disabled={!validRemote || start.isPending}>
-          {start.isPending ? "Starting…" : "Forward"}
+        <Button type="submit" size="sm" disabled={!validRemote || disabled || pending}>
+          {pending ? "Starting…" : "Forward"}
         </Button>
 
-        {ports.length > 0 && (
-          <span className="pb-1.5 text-[11.5px] text-muted-foreground">
-            Declared ports: <span className="font-mono">{ports.join(", ")}</span>
-          </span>
-        )}
+        {note && <span className="pb-1.5 text-[11.5px] text-muted-foreground">{note}</span>}
       </form>
 
-      {start.isError && (
+      {error != null && (
         <p className="text-sm text-destructive" role="alert">
-          {forwardErrorText(start.error)}
+          {forwardErrorText(error)}
         </p>
       )}
     </section>

@@ -541,12 +541,19 @@ export interface DrainResult {
   failed: number;
 }
 
-/** One active backend-managed port-forward (Sprint 6). */
+/** One active backend-managed port-forward (Sprint 6; service targets FB-13).
+ *  `targetKind` discriminates the two shapes: a pod forward carries `pod`, a
+ *  service forward carries `service` plus `backends` — its live endpoint count,
+ *  which shrinks as backing pods go away. `remotePort` is the pod port or the
+ *  service port respectively. */
 export interface PortForward {
   id: string;
   context: string;
   namespace: string;
-  pod: string;
+  targetKind: "pod" | "service";
+  pod?: string;
+  service?: string;
+  backends?: number;
   localPort: number;
   remotePort: number;
   startedAt: string;
@@ -556,13 +563,12 @@ interface PortForwardListResponse {
   items: PortForward[];
 }
 
-/** Parameters for starting a port-forward: 0 localPort auto-assigns. */
-export interface StartPortForwardParams {
-  namespace: string;
-  pod: string;
-  remotePort: number;
-  localPort?: number;
-}
+/** Parameters for starting a port-forward: 0 localPort auto-assigns. The target
+ *  is discriminated and mutually exclusive — one pod port, or one service port
+ *  load-balanced across the Service's ready endpoints. */
+export type StartPortForwardParams =
+  | { namespace: string; pod: string; remotePort: number; localPort?: number }
+  | { namespace: string; service: string; servicePort: number; localPort?: number };
 
 export const api = {
   config: async (): Promise<ServerConfig> => request<ServerConfig>("/api/v1/config"),
@@ -743,12 +749,14 @@ export const api = {
    *  fallback for the live events page. */
   eventsFeed: async (namespace?: string): Promise<EventFeedRow[]> =>
     (await request<WorkloadListResponse<EventFeedRow>>(`/api/v1/events/feed${nsQuery(namespace)}`)).items,
-  /** Backend-managed pod port-forwards (Sprint 6): start, list, stop. */
+  /** Backend-managed port-forwards (Sprint 6; service targets FB-13): start,
+   *  list, stop. */
   portForwards: {
     list: async (): Promise<PortForward[]> =>
       (await request<PortForwardListResponse>("/api/v1/portforwards")).items,
-    /** Start a forward (pod port → backend loopback listener). Starting is a
-     *  mutating control, so it is rejected in read-only mode server-side. */
+    /** Start a forward (pod port, or a service port load-balanced across its
+     *  ready endpoints → backend loopback listener). Starting is a mutating
+     *  control, so it is rejected in read-only mode server-side. */
     start: async (params: StartPortForwardParams): Promise<PortForward> =>
       request<PortForward>("/api/v1/portforwards", {
         method: "POST",
