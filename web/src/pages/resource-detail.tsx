@@ -1,5 +1,5 @@
 import { ChevronRight, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { ConfigMapDetail } from "@/components/configmap-detail";
@@ -35,7 +35,12 @@ import { cn } from "@/lib/utils";
 import { workloadKind } from "@/lib/workloads";
 import { podStatusTone, type StatusTone } from "@/lib/workload-status";
 
-type Tab = "summary" | "logs" | "terminal" | "yaml";
+// The graph pulls in Cytoscape + fcose, so it is code-split: the tab is free
+// until someone opens it, and first paint never pays for the renderer
+// (FB-14/ADR-0011). Still bundled, never fetched from a CDN (ADR-0002).
+const ResourceGraph = lazy(() => import("@/components/resource-graph"));
+
+type Tab = "summary" | "logs" | "terminal" | "graph" | "yaml";
 
 export function ResourceDetailPage() {
   const params = useParams();
@@ -154,6 +159,13 @@ export function ResourceDetailPage() {
             Terminal
           </TabButton>
         )}
+        {/* The graph is namespace-scoped (ADR-0011), so cluster-scoped objects
+            have nothing to focus it on. */}
+        {namespace && (
+          <TabButton active={tab === "graph"} onClick={() => setTab("graph")}>
+            Graph
+          </TabButton>
+        )}
         <TabButton active={tab === "yaml"} onClick={() => setTab("yaml")}>
           YAML
         </TabButton>
@@ -166,6 +178,10 @@ export function ResourceDetailPage() {
         // commands can mutate — the server enforces read-only, so if exec is
         // blocked the socket simply closes with an error the terminal shows.
         <ExecTerminal namespace={namespace ?? ""} name={name} object={object.data} />
+      ) : tab === "graph" && namespace ? (
+        <Suspense fallback={<Skeleton className="h-[420px] w-full" data-testid="graph-loading" />}>
+          <ResourceGraph namespace={namespace} kind={kind} name={name} />
+        </Suspense>
       ) : tab === "yaml" ? (
         // A Secret's YAML is masked, so editing it would apply the redaction
         // marker over the real data — force the YAML tab view-only for Secrets;

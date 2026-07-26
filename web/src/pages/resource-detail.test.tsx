@@ -98,6 +98,22 @@ describe("ResourceDetailPage", () => {
     );
   });
 
+  it("offers the relationship graph on a namespaced object (FB-14)", async () => {
+    getMock.mockResolvedValue(configmap);
+
+    renderDetail();
+    await screen.findByText("app=web");
+    expect(screen.getByRole("tab", { name: "Graph" })).toBeInTheDocument();
+  });
+
+  it("hides the graph tab for a cluster-scoped object, which has no namespace to scope it", async () => {
+    getMock.mockResolvedValue({ kind: "Node", metadata: { name: "node-1" } });
+
+    renderDetail("/resources/core/v1/nodes/node-1");
+    await waitFor(() => expect(getMock).toHaveBeenCalled());
+    expect(screen.queryByRole("tab", { name: "Graph" })).not.toBeInTheDocument();
+  });
+
   it("renders a not-found error state", async () => {
     getMock.mockRejectedValue(new ApiError("gone", "not_found", 404));
 
