@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,6 +20,10 @@ import (
 	"github.com/skriptvalley/kubescope/internal/stream"
 	"github.com/skriptvalley/kubescope/web"
 )
+
+// shutdownTimeout bounds the graceful drain after a signal. Overrunning it is
+// reported but not fatal: termination was requested, so the process exits 0.
+const shutdownTimeout = 10 * time.Second
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -53,8 +58,16 @@ func run(logger *slog.Logger) error {
 		portForwards.CloseOthers(current)
 	})
 
+	// SSE streams (watch feeds, pod logs) are long-lived HTTP requests that end
+	// only when the client goes away, and Shutdown waits for active requests — so
+	// without a drain signal a single open browser tab pins the server for the
+	// whole shutdown timeout. Closing this channel tells those handlers to return.
+	drain := make(chan struct{})
+	closeDrain := sync.OnceFunc(func() { close(drain) })
+
 	handler := server.New(server.Options{
 		Logger:             logger,
+		Drain:              drain,
 		Kube:               mgr,
 		Stream:             mgr,
 		Exec:               mgr,
@@ -74,6 +87,9 @@ func run(logger *slog.Logger) error {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// Fires as soon as Shutdown starts, before it begins waiting on active
+	// requests — the streaming handlers see it and unwind while the drain runs.
+	httpServer.RegisterOnShutdown(closeDrain)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -96,7 +112,7 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("http server: %w", err)
 	case <-ctx.Done():
 		logger.Info("shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		// Stop accepting first, then tear down live sessions: Shutdown does not
 		// drain hijacked WebSockets (exec) or close port-forward listeners, so
@@ -105,8 +121,13 @@ func run(logger *slog.Logger) error {
 		execSessions.CloseAll()
 		portForwards.CloseAll()
 		if err != nil {
-			return fmt.Errorf("graceful shutdown: %w", err)
+			// Everything the process owns is torn down by the lines above, and the
+			// operator asked it to stop — a drain that overran the deadline is worth
+			// reporting but is not a failed run, so it must not become exit(1).
+			logger.Warn("graceful shutdown did not complete before the deadline",
+				"error", err, "timeout", shutdownTimeout)
 		}
+		logger.Info("shutdown complete")
 		return nil
 	}
 }

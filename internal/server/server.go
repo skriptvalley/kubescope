@@ -60,6 +60,11 @@ type Options struct {
 	// Never logged.
 	BasicAuthUsername string
 	BasicAuthPassword string
+	// Drain is closed when the server begins shutting down. The long-lived
+	// streaming routes cancel their request context on it so http.Server.Shutdown
+	// is not held open by SSE streams that never end on their own. Nil disables
+	// the guard (router-only tests).
+	Drain <-chan struct{}
 	// ListenAddr is the configured bind address; the Host-allowlist middleware
 	// (DNS-rebinding protection, FB-3) derives its allowlist from it. Empty
 	// disables the Host check (used by router-only tests).
@@ -220,9 +225,15 @@ func New(opts Options) http.Handler {
 			// over the same transport. Registered only when a stream backend is
 			// wired (production always is; router-only tests skip it). The hub
 			// itself is built above so the health/setup probes can feed it.
+			// Both are open-ended requests, so they sit behind drainGuard: on
+			// shutdown their context is cancelled and they return, instead of
+			// holding Shutdown open for its full timeout.
 			if hub != nil {
-				v1.Get("/stream/resources/{group}/{version}/{resource}", stream.StreamHandler(hub, opts.Logger))
-				v1.Get("/stream/pods/{namespace}/{name}/logs", stream.LogsHandler(opts.Stream, opts.Logger))
+				v1.Group(func(s chi.Router) {
+					s.Use(drainGuard(opts.Drain))
+					s.Get("/stream/resources/{group}/{version}/{resource}", stream.StreamHandler(hub, opts.Logger))
+					s.Get("/stream/pods/{namespace}/{name}/logs", stream.LogsHandler(opts.Stream, opts.Logger))
+				})
 			}
 		})
 	})
