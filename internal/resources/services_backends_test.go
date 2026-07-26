@@ -123,6 +123,49 @@ func TestResolveServiceBackendsSingleUnnamedPort(t *testing.T) {
 	assert.Equal(t, []ServiceBackend{{Namespace: "web", Pod: "frontend-a", Port: 8080}}, backends)
 }
 
+func TestResolveServiceBackendsPrefersTheTCPPortOfADualProtocolNumber(t *testing.T) {
+	// kube-dns declares 53/UDP *before* 53/TCP. Matching on number alone would
+	// pick the UDP entry and reject a port that is perfectly forwardable.
+	client := fake.NewClientset(
+		backendService(
+			corev1.ServicePort{Name: "dns", Port: 53, Protocol: corev1.ProtocolUDP},
+			corev1.ServicePort{Name: "dns-tcp", Port: 53, Protocol: corev1.ProtocolTCP},
+		),
+		backendEndpoints(corev1.EndpointSubset{
+			Addresses: []corev1.EndpointAddress{podAddress("frontend-a", "10.1.0.1")},
+			Ports: []corev1.EndpointPort{
+				{Name: "dns", Port: 53, Protocol: corev1.ProtocolUDP},
+				{Name: "dns-tcp", Port: 53, Protocol: corev1.ProtocolTCP},
+			},
+		}),
+	)
+
+	backends, err := ResolveServiceBackends(context.Background(), client, "web", "frontend", 53)
+	require.NoError(t, err)
+	assert.Equal(t, []ServiceBackend{{Namespace: "web", Pod: "frontend-a", Port: 53}}, backends,
+		"the TCP entry must win, and its name must drive the endpoints-subset join")
+}
+
+func TestResolveServiceBackendsReportsReadyButPodlessEndpoints(t *testing.T) {
+	// A selector-less Service with manually managed Endpoints: the addresses are
+	// ready, they just have no pod to forward to. Saying "no ready endpoints"
+	// would contradict what the detail view shows.
+	client := fake.NewClientset(
+		backendService(corev1.ServicePort{Name: "http", Port: 80}),
+		backendEndpoints(corev1.EndpointSubset{
+			Addresses: []corev1.EndpointAddress{{IP: "203.0.113.7"}, {IP: "203.0.113.8"}},
+			Ports:     []corev1.EndpointPort{{Name: "http", Port: 8080}},
+		}),
+	)
+
+	_, err := ResolveServiceBackends(context.Background(), client, "web", "frontend", 80)
+	var e *NoReadyEndpointsError
+	require.ErrorAs(t, err, &e)
+	assert.Equal(t, 2, e.NonPodReady)
+	assert.Contains(t, err.Error(), "none backed by a pod")
+	assert.NotContains(t, err.Error(), "has no ready endpoints")
+}
+
 func TestResolveServiceBackendsErrors(t *testing.T) {
 	tests := []struct {
 		name    string

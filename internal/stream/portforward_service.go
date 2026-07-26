@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/skriptvalley/kubescope/internal/resources"
 )
@@ -31,6 +32,14 @@ import (
 // rotation, which would balance over a subset while claiming to front the
 // Service.
 const maxServiceBackends = 64
+
+// Accept-loop backoff: a transient accept failure is retried, a persistently
+// broken listener ends the session.
+const (
+	acceptRetryDelay  = 5 * time.Millisecond
+	acceptMaxDelay    = time.Second
+	acceptMaxFailures = 10
+)
 
 // TooManyBackendsError reports a Service with more ready endpoints than one
 // load-balanced forward will fan out to.
@@ -222,16 +231,35 @@ func (s *serviceForwarder) backendCount() int {
 	return n
 }
 
-// acceptLoop hands every new connection to the next live backend. A listener
-// that can no longer accept ends the session, so it never lingers in the active
-// list unable to serve.
+// acceptLoop hands every new connection to the next live backend.
+//
+// A closed listener is the deliberate teardown and simply ends the loop. Any
+// other accept failure is retried with backoff rather than treated as fatal:
+// fd exhaustion (EMFILE) surfaces here, and one transient blip must not silently
+// destroy a working forward — the same reason net/http's Serve loop backs off
+// instead of returning. A listener that keeps failing is genuinely unusable, so
+// after acceptMaxFailures consecutive errors the session ends rather than
+// lingering in the active list unable to serve.
 func (s *serviceForwarder) acceptLoop() {
+	delay := acceptRetryDelay
+	failures := 0
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
-			s.stop()
-			return
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			if failures++; failures > acceptMaxFailures {
+				s.stop()
+				return
+			}
+			time.Sleep(delay)
+			if delay *= 2; delay > acceptMaxDelay {
+				delay = acceptMaxDelay
+			}
+			continue
 		}
+		failures, delay = 0, acceptRetryDelay
 		go s.handle(conn)
 	}
 }
@@ -274,6 +302,13 @@ func (s *serviceForwarder) handle(client net.Conn) {
 		if err != nil {
 			continue
 		}
+		// Track the upstream half too, so stop() owns teardown of both ends
+		// rather than depending on the backend closing its side first.
+		if !s.track(upstream) {
+			_ = upstream.Close()
+			return
+		}
+		defer s.untrack(upstream)
 		splice(client, upstream)
 		return
 	}

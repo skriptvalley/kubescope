@@ -118,6 +118,23 @@ describe("ServiceDetail", () => {
     );
   });
 
+  it("does not count ready endpoints that have no pod behind them", async () => {
+    // A selector-less Service pointing at external addresses: ready, but not
+    // forwardable — advertising a fan-out here would promise what the server
+    // rejects with no_ready_endpoints.
+    configMock.mockResolvedValue({ readOnly: false, authMode: "none" });
+    detailMock.mockResolvedValue({
+      ...DETAIL,
+      readyAddresses: [{ ip: "203.0.113.7", ready: true }],
+      notReadyAddresses: [],
+    });
+    renderDetail();
+
+    const control = await screen.findByRole("region", { name: "Port forwarding" });
+    expect(control).toHaveTextContent(/no ready endpoints to forward to/i);
+    expect(screen.getByRole("button", { name: /forward/i })).toBeDisabled();
+  });
+
   it("hides the port-forward control in read-only mode", async () => {
     detailMock.mockResolvedValue(DETAIL);
     renderDetail();

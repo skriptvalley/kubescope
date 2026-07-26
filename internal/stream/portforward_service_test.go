@@ -8,8 +8,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -196,6 +199,114 @@ func TestServiceForwarderStopTearsDownEveryBackend(t *testing.T) {
 	}
 	_, err = net.Dial("tcp", net.JoinHostPort(pfLoopback, strconv.Itoa(int(local))))
 	assert.Error(t, err, "the public listener must be closed")
+}
+
+// flakyListener fails the first `fail` accepts with a transient error (the shape
+// of fd exhaustion) and counts every Accept call.
+type flakyListener struct {
+	net.Listener
+	fail     int
+	failed   atomic.Int64
+	accepted atomic.Int64
+}
+
+func (l *flakyListener) Accept() (net.Conn, error) {
+	l.accepted.Add(1)
+	if l.failed.Load() < int64(l.fail) {
+		l.failed.Add(1)
+		return nil, syscall.EMFILE
+	}
+	return l.Listener.Accept()
+}
+
+// newFlakyForwarder hand-builds a serviceForwarder over an injected listener, so
+// the accept loop can be tested without racing the one newServiceForwarder
+// starts.
+func newFlakyForwarder(t *testing.T, backend *fakeBackendPod, fail int) (*serviceForwarder, *flakyListener) {
+	t.Helper()
+	raw, err := net.Listen("tcp", net.JoinHostPort(pfLoopback, "0"))
+	require.NoError(t, err)
+	flaky := &flakyListener{Listener: raw, fail: fail}
+
+	sf := &serviceForwarder{
+		listener: flaky,
+		local:    uint16(raw.Addr().(*net.TCPAddr).Port),
+		backends: []*serviceBackend{{
+			pod:  backend.pod,
+			addr: net.JoinHostPort(pfLoopback, strconv.Itoa(int(backend.fwd.localPort()))),
+			fwd:  backend.fwd,
+		}},
+		conns:  make(map[net.Conn]struct{}),
+		doneCh: make(chan struct{}),
+	}
+	go sf.acceptLoop()
+	return sf, flaky
+}
+
+func TestServiceForwarderSurvivesATransientAcceptFailure(t *testing.T) {
+	// A blip (fd exhaustion) must not destroy a working forward: the loop backs
+	// off and retries rather than treating every accept error as fatal.
+	pods := newFakeBackendPods(t, "frontend-a")
+	sf, flaky := newFlakyForwarder(t, pods["frontend-a"], 3)
+	defer sf.stop()
+
+	assert.Equal(t, "frontend-a", dialMarker(t, sf.localPort()),
+		"the session must still serve after transient accept failures")
+	assert.Equal(t, int64(3), flaky.failed.Load(), "the test must actually have injected failures")
+	select {
+	case <-sf.done():
+		t.Fatal("a transient accept failure must not end the session")
+	default:
+	}
+}
+
+func TestServiceForwarderAcceptLoopExitsOnAClosedListener(t *testing.T) {
+	// A closed listener is the deliberate teardown, not a retryable failure: the
+	// loop must exit rather than spin on ErrClosed until the failure cap.
+	pods := newFakeBackendPods(t, "frontend-a")
+	sf, flaky := newFlakyForwarder(t, pods["frontend-a"], 0)
+
+	sf.stop()
+	time.Sleep(100 * time.Millisecond)
+	// The one parked Accept returns ErrClosed and the loop exits. A retry loop
+	// would instead burn through the failure cap (≥2 calls) before giving up.
+	assert.Equal(t, int64(1), flaky.accepted.Load(),
+		"the loop must stop calling Accept once the listener is closed")
+}
+
+func TestServiceForwarderStopClosesInFlightConnections(t *testing.T) {
+	// A backend that accepts and then goes silent would park splice forever if
+	// stop only owned the client half of the pair.
+	silent, err := net.Listen("tcp", net.JoinHostPort(pfLoopback, "0"))
+	require.NoError(t, err)
+	defer func() { _ = silent.Close() }()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := silent.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- conn // hold it open, never write
+	}()
+
+	fwd := newFakeForwarder(uint16(silent.Addr().(*net.TCPAddr).Port))
+	sf, _ := newFlakyForwarder(t, &fakeBackendPod{pod: "frontend-a", fwd: fwd}, 0)
+
+	client, err := net.Dial("tcp", net.JoinHostPort(pfLoopback, strconv.Itoa(int(sf.localPort()))))
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+	select {
+	case conn := <-accepted:
+		defer func() { _ = conn.Close() }()
+	case <-time.After(2 * time.Second):
+		t.Fatal("the balancer must have dialed the backend")
+	}
+
+	sf.stop()
+	require.NoError(t, client.SetReadDeadline(time.Now().Add(2*time.Second)))
+	_, err = client.Read(make([]byte, 1))
+	require.Error(t, err, "stop must close the client connection")
+	assert.NotErrorIs(t, err, os.ErrDeadlineExceeded, "stop must not leave the connection parked")
 }
 
 func TestServiceForwarderFailedBackendStopsTheRest(t *testing.T) {

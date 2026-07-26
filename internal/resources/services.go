@@ -230,9 +230,19 @@ type NoReadyEndpointsError struct {
 	Namespace string
 	Service   string
 	Port      int32
+	// NonPodReady counts ready addresses that exist but have no pod behind them
+	// — a selector-less Service with manually managed Endpoints pointing at
+	// external addresses. There is something ready, just nothing a port-forward
+	// can target, and saying "no ready endpoints" there would be false.
+	NonPodReady int
 }
 
 func (e *NoReadyEndpointsError) Error() string {
+	if e.NonPodReady > 0 {
+		return fmt.Sprintf(
+			"service %s/%s port %d has %d ready endpoint(s), none backed by a pod; a port-forward can only target pods",
+			e.Namespace, e.Service, e.Port, e.NonPodReady)
+	}
 	return fmt.Sprintf("service %s/%s port %d has no ready endpoints", e.Namespace, e.Service, e.Port)
 }
 
@@ -277,21 +287,35 @@ func ResolveServiceBackends(
 		return nil, fmt.Errorf("resolving endpoints for service %s/%s: %w", namespace, service, err)
 	}
 
-	backends := readyBackends(endpoints, port, namespace)
+	backends, nonPodReady := readyBackends(endpoints, port, namespace)
 	if len(backends) == 0 {
-		return nil, &NoReadyEndpointsError{Namespace: namespace, Service: service, Port: servicePort}
+		return nil, &NoReadyEndpointsError{
+			Namespace: namespace, Service: service, Port: servicePort, NonPodReady: nonPodReady,
+		}
 	}
 	return backends, nil
 }
 
-// findServicePort locates a Service's port by number, or nil.
+// findServicePort locates a Service's port by number, or nil. One number can
+// appear twice when the protocols differ — kube-dns declares 53/UDP *before*
+// 53/TCP — so a TCP entry always wins: it is the only one a forward can use. A
+// non-TCP match is returned only when no TCP port carries that number, so the
+// caller reports the protocol accurately instead of "no such port".
 func findServicePort(svc *corev1.Service, port int32) *corev1.ServicePort {
+	var nonTCP *corev1.ServicePort
 	for i := range svc.Spec.Ports {
-		if svc.Spec.Ports[i].Port == port {
-			return &svc.Spec.Ports[i]
+		p := &svc.Spec.Ports[i]
+		if p.Port != port {
+			continue
+		}
+		if portProtocol(p) == corev1.ProtocolTCP {
+			return p
+		}
+		if nonTCP == nil {
+			nonTCP = p
 		}
 	}
-	return nil
+	return nonTCP
 }
 
 // portProtocol reads a service port's protocol, defaulting to TCP as the API does.
@@ -304,9 +328,12 @@ func portProtocol(p *corev1.ServicePort) corev1.Protocol {
 
 // readyBackends collects one backend per ready address that targets a Pod,
 // carrying that subset's resolved numeric port for the requested service port.
-// Ordered by pod name for a deterministic rotation.
-func readyBackends(ep *corev1.Endpoints, svcPort *corev1.ServicePort, namespace string) []ServiceBackend {
+// Ordered by pod name for a deterministic rotation. Also reports how many ready
+// addresses were skipped for having no pod behind them, so an empty result can
+// say which of the two situations it is.
+func readyBackends(ep *corev1.Endpoints, svcPort *corev1.ServicePort, namespace string) ([]ServiceBackend, int) {
 	out := []ServiceBackend{}
+	nonPod := 0
 	for i := range ep.Subsets {
 		subset := &ep.Subsets[i]
 		port, ok := subsetPort(subset, svcPort)
@@ -316,7 +343,8 @@ func readyBackends(ep *corev1.Endpoints, svcPort *corev1.ServicePort, namespace 
 		for j := range subset.Addresses {
 			ref := subset.Addresses[j].TargetRef
 			if ref == nil || ref.Kind != "Pod" || ref.Name == "" {
-				continue // an endpoint with no pod behind it cannot be forwarded to
+				nonPod++ // an endpoint with no pod behind it cannot be forwarded to
+				continue
 			}
 			ns := ref.Namespace
 			if ns == "" {
@@ -331,7 +359,7 @@ func readyBackends(ep *corev1.Endpoints, svcPort *corev1.ServicePort, namespace 
 		}
 		return out[i].Pod < out[j].Pod
 	})
-	return out
+	return out, nonPod
 }
 
 // subsetPort finds a subset's port for the requested service port. Endpoints

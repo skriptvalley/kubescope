@@ -23,9 +23,19 @@ import type { EndpointAddressSummary, ServiceDetail as ServiceDetailData } from 
 // matching pod list), each linked to its pod detail via targetRef. FB-13 adds
 // the load-balanced port-forward over exactly those ready endpoints.
 
-/** Service ports that a forward can target: port-forwarding is TCP-only. */
+/** Service ports that a forward can target: port-forwarding is TCP-only. A
+ *  number declared for both protocols (kube-dns's 53) is offered once. */
 function forwardablePorts(data: ServiceDetailData): number[] {
-  return data.ports.filter((p) => (p.protocol || "TCP") === "TCP").map((p) => p.port);
+  const tcp = data.ports.filter((p) => (p.protocol || "TCP") === "TCP").map((p) => p.port);
+  return [...new Set(tcp)];
+}
+
+/** Ready endpoints a forward could actually reach. An address with no pod
+ *  behind it (a selector-less Service pointing at external addresses) is ready
+ *  but not forwardable, so counting it would advertise a fan-out the server
+ *  rejects. The authoritative live count comes back on the forward itself. */
+function forwardableEndpoints(data: ServiceDetailData): number {
+  return data.readyAddresses.filter((a) => a.targetRef?.kind === "Pod").length;
 }
 
 export function ServiceDetail({ namespace, name }: { namespace: string; name: string }) {
@@ -65,7 +75,7 @@ export function ServiceDetail({ namespace, name }: { namespace: string; name: st
           namespace={namespace}
           service={name}
           ports={forwardable}
-          readyEndpoints={data.readyAddresses.length}
+          readyEndpoints={forwardableEndpoints(data)}
         />
       )}
     </div>
