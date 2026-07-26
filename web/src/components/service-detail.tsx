@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { DetailField, DetailGrid, DetailSection, LabelBadges } from "@/components/detail-ui";
 import { EmptyState } from "@/components/empty-state";
 import { ErrorState } from "@/components/error-state";
+import { ServicePortForwardControls } from "@/components/port-forward-controls";
 import { StatusBadge } from "@/components/status-badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -13,20 +14,40 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useReadOnly } from "@/hooks/use-config";
 import { useServiceDetail } from "@/hooks/use-service-detail";
 import type { EndpointAddressSummary, ServiceDetail as ServiceDetailData } from "@/lib/api";
 
 // Service detail (Story 7.2). The generic object gives the spec; this view adds
 // the resolved Endpoints — the ready and not-ready backing pods (the Service's
-// matching pod list), each linked to its pod detail via targetRef.
+// matching pod list), each linked to its pod detail via targetRef. FB-13 adds
+// the load-balanced port-forward over exactly those ready endpoints.
+
+/** Service ports that a forward can target: port-forwarding is TCP-only. A
+ *  number declared for both protocols (kube-dns's 53) is offered once. */
+function forwardablePorts(data: ServiceDetailData): number[] {
+  const tcp = data.ports.filter((p) => (p.protocol || "TCP") === "TCP").map((p) => p.port);
+  return [...new Set(tcp)];
+}
+
+/** Ready endpoints a forward could actually reach. An address with no pod
+ *  behind it (a selector-less Service pointing at external addresses) is ready
+ *  but not forwardable, so counting it would advertise a fan-out the server
+ *  rejects. The authoritative live count comes back on the forward itself. */
+function forwardableEndpoints(data: ServiceDetailData): number {
+  return data.readyAddresses.filter((a) => a.targetRef?.kind === "Pod").length;
+}
 
 export function ServiceDetail({ namespace, name }: { namespace: string; name: string }) {
   const { data, isPending, isError, error, refetch } = useServiceDetail(namespace, name);
+  const readOnly = useReadOnly();
 
   if (isPending) return <Skeleton className="h-40 w-full" data-testid="service-detail-loading" />;
   if (isError) {
     return <ErrorState error={error} onRetry={() => refetch()} title="Failed to load service" />;
   }
+
+  const forwardable = forwardablePorts(data);
 
   return (
     <div className="space-y-6">
@@ -48,6 +69,15 @@ export function ServiceDetail({ namespace, name }: { namespace: string; name: st
       <DetailSection title="Endpoints">
         <Endpoints data={data} />
       </DetailSection>
+
+      {!readOnly && forwardable.length > 0 && (
+        <ServicePortForwardControls
+          namespace={namespace}
+          service={name}
+          ports={forwardable}
+          readyEndpoints={forwardableEndpoints(data)}
+        />
+      )}
     </div>
   );
 }

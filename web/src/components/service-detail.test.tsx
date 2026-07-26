@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,9 +7,19 @@ import { ServiceDetail } from "@/components/service-detail";
 import { ApiError, type ServiceDetail as ServiceDetailData } from "@/lib/api";
 
 const detailMock = vi.hoisted(() => vi.fn());
+const configMock = vi.hoisted(() => vi.fn());
+const startMock = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/api")>();
-  return { ...original, api: { ...original.api, services: { detail: detailMock } } };
+  return {
+    ...original,
+    api: {
+      ...original.api,
+      config: configMock,
+      services: { detail: detailMock },
+      portForwards: { ...original.api.portForwards, start: startMock },
+    },
+  };
 });
 
 function renderDetail() {
@@ -42,6 +52,10 @@ const DETAIL: ServiceDetailData = {
 describe("ServiceDetail", () => {
   beforeEach(() => {
     detailMock.mockReset();
+    startMock.mockReset();
+    startMock.mockResolvedValue({});
+    configMock.mockReset();
+    configMock.mockResolvedValue({ readOnly: true, authMode: "none" });
   });
 
   it("renders the selector, ports and ready/not-ready endpoints with pod links", async () => {
@@ -79,5 +93,52 @@ describe("ServiceDetail", () => {
     renderDetail();
     expect(await screen.findByTestId("error-state")).toHaveTextContent("Not found");
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  // FB-13: the load-balanced forward targets exactly the ready endpoints the
+  // section above lists, and is gated by the same read-only rule as the pod one.
+  it("offers a load-balanced port-forward over the ready endpoints when writable", async () => {
+    configMock.mockResolvedValue({ readOnly: false, authMode: "none" });
+    detailMock.mockResolvedValue(DETAIL);
+    renderDetail();
+
+    const control = await screen.findByRole("region", { name: "Port forwarding" });
+    expect(control).toHaveTextContent(/load-balanced across 1 endpoint\b/i);
+    // The service port (80) prefills, not the pod-side targetPort (8080).
+    expect(screen.getByLabelText("Service port")).toHaveValue(80);
+
+    fireEvent.click(screen.getByRole("button", { name: /forward/i }));
+    await waitFor(() =>
+      expect(startMock).toHaveBeenCalledWith({
+        namespace: "default",
+        service: "web",
+        servicePort: 80,
+        localPort: 0,
+      }),
+    );
+  });
+
+  it("does not count ready endpoints that have no pod behind them", async () => {
+    // A selector-less Service pointing at external addresses: ready, but not
+    // forwardable — advertising a fan-out here would promise what the server
+    // rejects with no_ready_endpoints.
+    configMock.mockResolvedValue({ readOnly: false, authMode: "none" });
+    detailMock.mockResolvedValue({
+      ...DETAIL,
+      readyAddresses: [{ ip: "203.0.113.7", ready: true }],
+      notReadyAddresses: [],
+    });
+    renderDetail();
+
+    const control = await screen.findByRole("region", { name: "Port forwarding" });
+    expect(control).toHaveTextContent(/no ready endpoints to forward to/i);
+    expect(screen.getByRole("button", { name: /forward/i })).toBeDisabled();
+  });
+
+  it("hides the port-forward control in read-only mode", async () => {
+    detailMock.mockResolvedValue(DETAIL);
+    renderDetail();
+    expect(await screen.findByText("app=web")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Port forwarding" })).not.toBeInTheDocument();
   });
 });

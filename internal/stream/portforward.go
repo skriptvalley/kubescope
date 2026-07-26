@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
+
+	"github.com/skriptvalley/kubescope/internal/resources"
 )
 
 // pfReadyTimeout bounds establishing a forward so a black-hole apiserver fails
@@ -41,12 +44,24 @@ type PortForwardCluster interface {
 	RestConfigFor(name string) (*rest.Config, error)
 }
 
-// PortForward is the API view of one active forward.
+// Target kinds a forward can point at (FB-13): one pod, or a Service whose ready
+// endpoints are load-balanced behind a single listener.
+const (
+	targetKindPod     = "pod"
+	targetKindService = "service"
+)
+
+// PortForward is the API view of one active forward. Pod and Service are
+// mutually exclusive, discriminated by TargetKind; Backends is the live backend
+// count of a service forward (the rotation shrinks as pods go away).
 type PortForward struct {
 	ID         string    `json:"id"`
 	Context    string    `json:"context"`
 	Namespace  string    `json:"namespace"`
-	Pod        string    `json:"pod"`
+	TargetKind string    `json:"targetKind"`
+	Pod        string    `json:"pod,omitempty"`
+	Service    string    `json:"service,omitempty"`
+	Backends   int       `json:"backends,omitempty"`
 	LocalPort  uint16    `json:"localPort"`
 	RemotePort uint16    `json:"remotePort"`
 	StartedAt  time.Time `json:"startedAt"`
@@ -75,10 +90,13 @@ type forwarder interface {
 // The default wires client-go's SPDY port-forward; tests inject a fake.
 type forwarderFactory func(t forwardTarget) (forwarder, error)
 
-// activeForward is a tracked forward plus its idempotent stop.
+// activeForward is a tracked forward plus its idempotent stop. backends reports
+// the live backend count for a service forward and is nil for a pod forward,
+// whose single tunnel is either up or gone from the registry.
 type activeForward struct {
 	PortForward
-	stop func()
+	stop     func()
+	backends func() int
 }
 
 // PortForwardManager owns every active forward for the process. Forwards are
@@ -127,17 +145,32 @@ func NewPortForwardManager(cluster PortForwardCluster, logger *slog.Logger, opts
 	return m
 }
 
-// startRequest is the create-forward request body.
+// startRequest is the create-forward request body. The target is discriminated:
+// exactly one of Pod (with RemotePort) or Service (with ServicePort).
 type startRequest struct {
-	Namespace  string `json:"namespace"`
-	Pod        string `json:"pod"`
-	RemotePort uint16 `json:"remotePort"`
-	LocalPort  uint16 `json:"localPort"` // 0 = auto-assign
+	Namespace   string `json:"namespace"`
+	Pod         string `json:"pod,omitempty"`
+	RemotePort  uint16 `json:"remotePort,omitempty"`
+	Service     string `json:"service,omitempty"`
+	ServicePort uint16 `json:"servicePort,omitempty"`
+	LocalPort   uint16 `json:"localPort"` // 0 = auto-assign
+}
+
+// target names the forward's destination for error messages and session logs.
+// It carries only the object names the user asked for — never forwarded traffic
+// or per-connection metadata.
+func (r startRequest) target() string {
+	if r.Service != "" {
+		return fmt.Sprintf("service %s/%s", r.Namespace, r.Service)
+	}
+	return fmt.Sprintf("pod %s/%s", r.Namespace, r.Pod)
 }
 
 // start resolves the active context, establishes the forward and registers it.
 // A forward that later dies on its own is dropped from the registry by a watcher.
-func (m *PortForwardManager) start(req startRequest) (PortForward, error) {
+// ctx bounds only the cluster lookups done while establishing (a service target
+// resolves its endpoints first); the forward itself outlives the request.
+func (m *PortForwardManager) start(ctx context.Context, req startRequest) (PortForward, error) {
 	ctxName, err := m.cluster.ActiveContextName()
 	if err != nil {
 		return PortForward{}, err
@@ -151,30 +184,28 @@ func (m *PortForwardManager) start(req startRequest) (PortForward, error) {
 		return PortForward{}, err
 	}
 
-	fwd, err := m.factory(forwardTarget{
-		restConfig: restCfg,
-		clientset:  clientset,
-		namespace:  req.Namespace,
-		pod:        req.Pod,
-		localPort:  req.LocalPort,
-		remotePort: req.RemotePort,
-	})
+	base := forwardTarget{restConfig: restCfg, clientset: clientset}
+	pf := PortForward{Context: ctxName, Namespace: req.Namespace, StartedAt: m.now()}
+
+	var (
+		fwd     forwarder
+		counter func() int
+	)
+	if req.Service != "" {
+		fwd, counter, err = m.startService(ctx, base, req, &pf)
+	} else {
+		fwd, err = m.startPod(base, req, &pf)
+	}
 	if err != nil {
 		return PortForward{}, err
 	}
 
 	id := m.newID()
-	pf := PortForward{
-		ID:         id,
-		Context:    ctxName,
-		Namespace:  req.Namespace,
-		Pod:        req.Pod,
-		LocalPort:  fwd.localPort(),
-		RemotePort: req.RemotePort,
-		StartedAt:  m.now(),
-	}
+	pf.ID = id
+	pf.LocalPort = fwd.localPort()
+
 	m.mu.Lock()
-	m.forwards[id] = &activeForward{PortForward: pf, stop: fwd.stop}
+	m.forwards[id] = &activeForward{PortForward: pf, stop: fwd.stop, backends: counter}
 	m.mu.Unlock()
 
 	// Establishing the forward can block for seconds; a context switch during
@@ -186,19 +217,69 @@ func (m *PortForwardManager) start(req startRequest) (PortForward, error) {
 		if m.remove(id) {
 			fwd.stop()
 		}
-		return PortForward{}, fmt.Errorf("active context changed while establishing forward to %s/%s", req.Namespace, req.Pod)
+		return PortForward{}, fmt.Errorf("active context changed while establishing forward to %s", req.target())
 	}
 
-	// A forward exiting on its own (pod deleted mid-forward) is removed so the
-	// list never shows a dead forward. A deliberate Stop closes the same done
-	// channel; remove is idempotent, so the watcher is harmless either way.
+	// A forward exiting on its own (pod deleted mid-forward, or a service session
+	// losing its last backend) is removed so the list never shows a dead forward.
+	// A deliberate Stop closes the same done channel; remove is idempotent, so
+	// the watcher is harmless either way.
 	go func() {
 		<-fwd.done()
 		if m.remove(id) {
-			m.logger.Info("port-forward closed", "id", id, "pod", req.Pod, "namespace", req.Namespace)
+			m.logger.Info("port-forward closed", "id", id, "target", req.target())
 		}
 	}()
 	return pf, nil
+}
+
+// startPod establishes the 1:1 pod forward and fills in its view fields.
+func (m *PortForwardManager) startPod(base forwardTarget, req startRequest, pf *PortForward) (forwarder, error) {
+	base.namespace = req.Namespace
+	base.pod = req.Pod
+	base.localPort = req.LocalPort
+	base.remotePort = req.RemotePort
+
+	fwd, err := m.factory(base)
+	if err != nil {
+		return nil, err
+	}
+	pf.TargetKind = targetKindPod
+	pf.Pod = req.Pod
+	pf.RemotePort = req.RemotePort
+	return fwd, nil
+}
+
+// startService snapshots the Service's ready endpoints, opens one forward per
+// backend pod and fronts them with the load-balancing listener. Endpoints are
+// resolved once, at start: churn afterwards is not tracked (ADR-0006 addendum).
+func (m *PortForwardManager) startService(
+	ctx context.Context,
+	base forwardTarget,
+	req startRequest,
+	pf *PortForward,
+) (forwarder, func() int, error) {
+	backends, err := resources.ResolveServiceBackends(
+		ctx, base.clientset, req.Namespace, req.Service, int32(req.ServicePort))
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(backends) > maxServiceBackends {
+		return nil, nil, &TooManyBackendsError{
+			Namespace: req.Namespace, Service: req.Service,
+			Ready: len(backends), Max: maxServiceBackends,
+		}
+	}
+
+	sf, err := newServiceForwarder(m.factory, base, backends, req.LocalPort)
+	if err != nil {
+		return nil, nil, err
+	}
+	pf.TargetKind = targetKindService
+	pf.Service = req.Service
+	pf.RemotePort = req.ServicePort
+	pf.Backends = len(backends)
+	return sf, sf.backendCount, nil
 }
 
 // remove drops a forward from the registry, reporting whether it was present.
@@ -233,7 +314,11 @@ func (m *PortForwardManager) List() []PortForward {
 	m.mu.Lock()
 	out := make([]PortForward, 0, len(m.forwards))
 	for _, af := range m.forwards {
-		out = append(out, af.PortForward)
+		pf := af.PortForward
+		if af.backends != nil {
+			pf.Backends = af.backends() // live count, not the start-time snapshot
+		}
+		out = append(out, pf)
 	}
 	m.mu.Unlock()
 	sort.Slice(out, func(i, j int) bool {
@@ -291,11 +376,11 @@ func (m *PortForwardManager) CreateHandler() http.HandlerFunc {
 			writeStreamError(w, m.logger, http.StatusBadRequest, "invalid_request", err.Error())
 			return
 		}
-		pf, err := m.start(req)
+		pf, err := m.start(r.Context(), req)
 		if err != nil {
 			status, code := forwardErrorStatus(err)
 			writeStreamError(w, m.logger, status, code,
-				fmt.Sprintf("starting forward to %s/%s: %v", req.Namespace, req.Pod, err))
+				fmt.Sprintf("starting forward to %s: %v", req.target(), err))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -333,29 +418,59 @@ func (m *PortForwardManager) DeleteHandler() http.HandlerFunc {
 }
 
 // validateStartRequest checks the create-forward parameters before any cluster
-// call, so bad input is a fast 400 rather than a dial failure.
+// call, so bad input is a fast 400 rather than a dial failure. The target is
+// discriminated here: exactly one of pod or service, each with its own port
+// field, so a request that mixes the two is rejected rather than silently
+// resolving to one of them.
 func validateStartRequest(req startRequest) error {
 	if req.Namespace == "" {
 		return errors.New("namespace is required")
 	}
-	if req.Pod == "" {
-		return errors.New("pod is required")
-	}
-	if req.RemotePort == 0 {
-		return errors.New("remotePort is required and must be 1-65535")
+	hasPod, hasService := req.Pod != "", req.Service != ""
+	switch {
+	case hasPod && hasService:
+		return errors.New("target must be exactly one of pod or service, not both")
+	case !hasPod && !hasService:
+		return errors.New("target is required: set either pod or service")
+	case hasPod:
+		if req.ServicePort != 0 {
+			return errors.New("servicePort belongs to a service target; a pod target uses remotePort")
+		}
+		if req.RemotePort == 0 {
+			return errors.New("remotePort is required and must be 1-65535")
+		}
+	default:
+		if req.RemotePort != 0 {
+			return errors.New("remotePort belongs to a pod target; a service target uses servicePort")
+		}
+		if req.ServicePort == 0 {
+			return errors.New("servicePort is required and must be 1-65535")
+		}
 	}
 	return nil
 }
 
 // forwardErrorStatus maps a start failure to an HTTP status + code, extending the
 // read taxonomy with the port-in-use case (a local listener conflict, not an
-// apiserver error).
+// apiserver error) and the service-target resolution failures (FB-13).
 func forwardErrorStatus(err error) (int, string) {
+	var (
+		portNotFound *resources.ServicePortNotFoundError
+		badProtocol  *resources.UnsupportedPortProtocolError
+		noEndpoints  *resources.NoReadyEndpointsError
+		tooMany      *TooManyBackendsError
+	)
 	switch {
-	case apierrors.IsNotFound(err):
+	case apierrors.IsNotFound(err) || errors.As(err, &portNotFound):
 		return http.StatusNotFound, "not_found"
 	case apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err):
 		return http.StatusForbidden, "forbidden"
+	case errors.As(err, &noEndpoints):
+		return http.StatusConflict, "no_ready_endpoints"
+	case errors.As(err, &badProtocol):
+		return http.StatusUnprocessableEntity, "unsupported_protocol"
+	case errors.As(err, &tooMany):
+		return http.StatusUnprocessableEntity, "too_many_backends"
 	case strings.Contains(err.Error(), "address already in use"):
 		return http.StatusConflict, "port_in_use"
 	default:

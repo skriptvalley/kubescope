@@ -85,15 +85,19 @@ sequenceDiagram
 
 Teardown: a client disconnect cancels the SPDY session (no leaked goroutines); the remote process exiting closes the WebSocket with the structured reason above; a context switch or server shutdown tears every session down. `KUBESCOPE_READ_ONLY=true` rejects the upgrade with a 403 before it upgrades (the route lives in the read-only mutation group).
 
-### 4. Port-forward a pod (backend-managed sessions)
+### 4. Port-forward a pod or a Service (backend-managed sessions)
 
 Port-forwards are control operations, not streams, so they are a plain HTTP API over a per-context registry (`internal/stream/portforward.go`):
 
-- `POST /api/v1/portforwards` `{namespace, pod, remotePort, localPort?}` — establishes a client-go SPDY port-forward and binds a **loopback** (`127.0.0.1`) listener; `localPort` 0 auto-assigns. Returns the active forward (with the bound local port). Gated by read-only mode.
-- `GET /api/v1/portforwards` — lists active forwards (pod, ports, context, `startedAt`).
-- `DELETE /api/v1/portforwards/{id}` — stops a forward (idempotent); the listener closes immediately.
+- `POST /api/v1/portforwards` — establishes the forward and binds a **loopback** (`127.0.0.1`) listener; `localPort` 0 auto-assigns. Returns the active forward (with the bound local port). Gated by read-only mode. The target is discriminated and mutually exclusive:
+  - `{namespace, pod, remotePort, localPort?}` — one client-go SPDY forward to one pod.
+  - `{namespace, service, servicePort, localPort?}` — one forward per **ready endpoint pod**, fronted by a single listener that round-robins each new TCP connection across them (FB-13, `internal/stream/portforward_service.go`).
+- `GET /api/v1/portforwards` — lists active forwards (`targetKind`, pod or service, ports, context, `startedAt`, and for a service the **live** backend count).
+- `DELETE /api/v1/portforwards/{id}` — stops a forward (idempotent); the listener closes immediately, and a service session's per-pod legs go with it.
 
-A forward that dies on its own (pod deleted mid-forward) is dropped from the registry by a watcher. Forwards bind loopback only; reaching a forwarded port from the container host requires publishing it (`docker run -p`). Like exec sessions, forwards are per-context and torn down on a context switch or server shutdown.
+A forward that dies on its own (pod deleted mid-forward) is dropped from the registry by a watcher; a service session survives while ≥1 backend is live and closes when the last one goes. Forwards bind loopback only; reaching a forwarded port from the container host requires publishing it (`docker run -p`). Like exec sessions, forwards are per-context and torn down as a group on a context switch or server shutdown.
+
+Service targets resolve their ready endpoints once, at start, through `resources.ResolveServiceBackends` — the same Endpoints read that backs the Service detail view, which also resolves a named `targetPort` per pod. Balancing is **per-connection** (kube-proxy granularity), not per-request; endpoint churn after start is not tracked. Rationale, the 64-backend cap and the deferred churn-tracking follow-up are in the [adr/0006 FB-13 addendum](adr/0006-live-updates-sse-and-streaming-websocket.md).
 
 ## Deployment model
 

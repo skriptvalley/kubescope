@@ -11,7 +11,7 @@ Decisions that lock Kubescope's technical direction. Referenced from [../ARCHITE
 | 0003 | [Generic resource access via discovery and dynamic client](0003-generic-resource-access-via-discovery-and-dynamic-client.md) | Accepted | 2026-07-14 |
 | 0004 | [Cluster auth and kubeconfig in Docker](0004-cluster-auth-and-kubeconfig-in-docker.md) | Accepted | 2026-07-14 |
 | 0005 | [Security posture: read-only mode and secret masking](0005-security-posture-read-only-and-secret-masking.md) | Accepted | 2026-07-14 |
-| 0006 | [Live updates via SSE, streaming via WebSocket](0006-live-updates-sse-and-streaming-websocket.md) | Accepted | 2026-07-14 |
+| 0006 | [Live updates via SSE, streaming via WebSocket](0006-live-updates-sse-and-streaming-websocket.md) (+ FB-13 addendum: service port-forward) | Accepted | 2026-07-14 (add. 2026-07-26) |
 | 0007 | [Runtime kubeconfig source: path-only, opt-in](0007-runtime-kubeconfig-source.md) | Superseded by 0008 | 2026-07-17 |
 | 0008 | [Kubeconfig source registry: files + directories, kubectl merge](0008-kubeconfig-source-registry.md) | Accepted | 2026-07-17 |
 | 0009 | [Adopt the skriptvalley "Dusk" design system](0009-dusk-design-system.md) | Accepted | 2026-07-21 |

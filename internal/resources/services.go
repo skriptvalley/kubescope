@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 // Typed Service detail (Sprint 7, Story 7.2). The generic engine serves the
@@ -175,4 +177,203 @@ func shapeEndpointAddress(addr *corev1.EndpointAddress, ready bool) EndpointAddr
 
 func sortAddresses(addrs []EndpointAddressSummary) {
 	sort.Slice(addrs, func(i, j int) bool { return addrs[i].IP < addrs[j].IP })
+}
+
+// Service → ready-endpoint resolution (FB-13). The detail handler above shapes a
+// Service's endpoints for display; the service port-forward needs the same
+// resolution as *targets*: which pods are ready right now, and on which concrete
+// container port. Both read the one authoritative source — the Endpoints object
+// the endpoints controller maintains — so the forward balances over exactly the
+// backends the detail view shows as ready.
+
+// ServiceBackend is one ready endpoint pod of a Service together with the
+// numeric container port that the requested service port maps to on that pod.
+type ServiceBackend struct {
+	Namespace string
+	Pod       string
+	Port      uint16
+}
+
+// ServicePortNotFoundError reports that a Service exists but declares no port
+// with the requested number. A 404-class failure, distinct from a missing
+// Service (which surfaces as an apierror NotFound).
+type ServicePortNotFoundError struct {
+	Namespace string
+	Service   string
+	Port      int32
+}
+
+func (e *ServicePortNotFoundError) Error() string {
+	return fmt.Sprintf("service %s/%s declares no port %d", e.Namespace, e.Service, e.Port)
+}
+
+// UnsupportedPortProtocolError reports a service port that cannot be forwarded.
+// Port-forwarding is TCP-only (the SPDY portforward subresource carries TCP
+// streams), so a UDP or SCTP port fails up front instead of binding a listener
+// that could never carry the protocol.
+type UnsupportedPortProtocolError struct {
+	Namespace string
+	Service   string
+	Port      int32
+	Protocol  string
+}
+
+func (e *UnsupportedPortProtocolError) Error() string {
+	return fmt.Sprintf("service %s/%s port %d is %s; only TCP ports can be forwarded",
+		e.Namespace, e.Service, e.Port, e.Protocol)
+}
+
+// NoReadyEndpointsError reports that a Service resolved to zero ready backend
+// pods. Returned immediately so a caller fails fast rather than standing up a
+// listener with nowhere to send traffic.
+type NoReadyEndpointsError struct {
+	Namespace string
+	Service   string
+	Port      int32
+	// NonPodReady counts ready addresses that exist but have no pod behind them
+	// — a selector-less Service with manually managed Endpoints pointing at
+	// external addresses. There is something ready, just nothing a port-forward
+	// can target, and saying "no ready endpoints" there would be false.
+	NonPodReady int
+}
+
+func (e *NoReadyEndpointsError) Error() string {
+	if e.NonPodReady > 0 {
+		return fmt.Sprintf(
+			"service %s/%s port %d has %d ready endpoint(s), none backed by a pod; a port-forward can only target pods",
+			e.Namespace, e.Service, e.Port, e.NonPodReady)
+	}
+	return fmt.Sprintf("service %s/%s port %d has no ready endpoints", e.Namespace, e.Service, e.Port)
+}
+
+// ResolveServiceBackends resolves (namespace, service, servicePort) to the
+// Service's ready endpoint pods, each with the concrete numeric container port
+// the service port maps to on that pod.
+//
+// The per-pod port resolution comes free from the Endpoints object: the
+// endpoints controller has already resolved any named targetPort against each
+// pod's containers, and pods that resolve the same name to different numbers
+// land in different subsets carrying different ports. Only Ready addresses are
+// used — not-ready and terminating pods are excluded, exactly as kube-proxy
+// excludes them from the ClusterIP rotation.
+func ResolveServiceBackends(
+	ctx context.Context,
+	clientset kubernetes.Interface,
+	namespace, service string,
+	servicePort int32,
+) ([]ServiceBackend, error) {
+	svc, err := clientset.CoreV1().Services(namespace).Get(ctx, service, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("getting service %s/%s: %w", namespace, service, err)
+	}
+
+	port := findServicePort(svc, servicePort)
+	if port == nil {
+		return nil, &ServicePortNotFoundError{Namespace: namespace, Service: service, Port: servicePort}
+	}
+	if proto := portProtocol(port); proto != corev1.ProtocolTCP {
+		return nil, &UnsupportedPortProtocolError{
+			Namespace: namespace, Service: service, Port: servicePort, Protocol: string(proto),
+		}
+	}
+
+	endpoints, err := clientset.CoreV1().Endpoints(namespace).Get(ctx, service, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		// No Endpoints object: a headless service, or none created yet. Not a
+		// missing Service — report it as the empty-rotation case.
+		return nil, &NoReadyEndpointsError{Namespace: namespace, Service: service, Port: servicePort}
+	case err != nil:
+		return nil, fmt.Errorf("resolving endpoints for service %s/%s: %w", namespace, service, err)
+	}
+
+	backends, nonPodReady := readyBackends(endpoints, port, namespace)
+	if len(backends) == 0 {
+		return nil, &NoReadyEndpointsError{
+			Namespace: namespace, Service: service, Port: servicePort, NonPodReady: nonPodReady,
+		}
+	}
+	return backends, nil
+}
+
+// findServicePort locates a Service's port by number, or nil. One number can
+// appear twice when the protocols differ — kube-dns declares 53/UDP *before*
+// 53/TCP — so a TCP entry always wins: it is the only one a forward can use. A
+// non-TCP match is returned only when no TCP port carries that number, so the
+// caller reports the protocol accurately instead of "no such port".
+func findServicePort(svc *corev1.Service, port int32) *corev1.ServicePort {
+	var nonTCP *corev1.ServicePort
+	for i := range svc.Spec.Ports {
+		p := &svc.Spec.Ports[i]
+		if p.Port != port {
+			continue
+		}
+		if portProtocol(p) == corev1.ProtocolTCP {
+			return p
+		}
+		if nonTCP == nil {
+			nonTCP = p
+		}
+	}
+	return nonTCP
+}
+
+// portProtocol reads a service port's protocol, defaulting to TCP as the API does.
+func portProtocol(p *corev1.ServicePort) corev1.Protocol {
+	if p.Protocol == "" {
+		return corev1.ProtocolTCP
+	}
+	return p.Protocol
+}
+
+// readyBackends collects one backend per ready address that targets a Pod,
+// carrying that subset's resolved numeric port for the requested service port.
+// Ordered by pod name for a deterministic rotation. Also reports how many ready
+// addresses were skipped for having no pod behind them, so an empty result can
+// say which of the two situations it is.
+func readyBackends(ep *corev1.Endpoints, svcPort *corev1.ServicePort, namespace string) ([]ServiceBackend, int) {
+	out := []ServiceBackend{}
+	nonPod := 0
+	for i := range ep.Subsets {
+		subset := &ep.Subsets[i]
+		port, ok := subsetPort(subset, svcPort)
+		if !ok {
+			continue
+		}
+		for j := range subset.Addresses {
+			ref := subset.Addresses[j].TargetRef
+			if ref == nil || ref.Kind != "Pod" || ref.Name == "" {
+				nonPod++ // an endpoint with no pod behind it cannot be forwarded to
+				continue
+			}
+			ns := ref.Namespace
+			if ns == "" {
+				ns = namespace
+			}
+			out = append(out, ServiceBackend{Namespace: ns, Pod: ref.Name, Port: port})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Pod == out[j].Pod {
+			return out[i].Port < out[j].Port
+		}
+		return out[i].Pod < out[j].Pod
+	})
+	return out, nonPod
+}
+
+// subsetPort finds a subset's port for the requested service port. Endpoints
+// ports are keyed by the *service* port's name (empty for a single unnamed
+// port), so the name is the correct join for a multi-port service.
+func subsetPort(subset *corev1.EndpointSubset, svcPort *corev1.ServicePort) (uint16, bool) {
+	for _, p := range subset.Ports {
+		if p.Name != svcPort.Name {
+			continue
+		}
+		if p.Port < 1 || p.Port > 65535 {
+			return 0, false
+		}
+		return uint16(p.Port), true
+	}
+	return 0, false
 }
