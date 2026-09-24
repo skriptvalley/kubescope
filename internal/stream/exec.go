@@ -122,10 +122,21 @@ func defaultExecutorFactory(cfg *rest.Config, u *url.URL) (remotecommand.Executo
 
 type execConfig struct {
 	factory executorFactory
+	// devOrigins also admits localhost/127.0.0.1/[::1] origins on any port — the
+	// Vite dev proxy (make dev). On by default; the server turns it off unless it
+	// is bound to loopback, so a page on another localhost port can't open a pod
+	// shell on an instance reached through a port-forward (cookies ignore ports).
+	devOrigins bool
 }
 
 // ExecOption tunes the exec handler.
 type ExecOption func(*execConfig)
+
+// WithDevOrigins sets whether localhost origins on any port may open the exec
+// socket in addition to same-origin pages (see execConfig.devOrigins).
+func WithDevOrigins(allow bool) ExecOption {
+	return func(c *execConfig) { c.devOrigins = allow }
+}
 
 // withExecutorFactory overrides how the remote executor is built (tests only).
 func withExecutorFactory(f executorFactory) ExecOption {
@@ -140,7 +151,7 @@ func withExecutorFactory(f executorFactory) ExecOption {
 // container, RBAC denied, remote process exit — is surfaced as a structured
 // control frame plus a close, never a silent hang.
 func ExecHandler(cluster ExecCluster, reg *ExecRegistry, logger *slog.Logger, opts ...ExecOption) http.HandlerFunc {
-	cfg := execConfig{factory: defaultExecutorFactory}
+	cfg := execConfig{factory: defaultExecutorFactory, devOrigins: true}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
@@ -149,14 +160,16 @@ func ExecHandler(cluster ExecCluster, reg *ExecRegistry, logger *slog.Logger, op
 		name := chi.URLParam(r, "name")
 		target := buildExecOptions(r.URL.Query())
 
-		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			// Same-origin is always authorized (the embedded SPA); these patterns
-			// additionally allow the Vite dev proxy (make dev) without opening the
-			// exec socket to arbitrary cross-origin pages. Patterns are matched with
-			// path.Match, so the IPv6-loopback brackets must be escaped or they are
-			// read as a character class (a dead, never-matching entry).
-			OriginPatterns: []string{"localhost:*", "127.0.0.1:*", `\[::1\]:*`},
-		})
+		// Same-origin is always authorized (the embedded SPA); the dev patterns
+		// additionally allow the Vite dev proxy (make dev) without opening the exec
+		// socket to arbitrary cross-origin pages. Patterns are matched with
+		// path.Match, so the IPv6-loopback brackets must be escaped or they are read
+		// as a character class (a dead, never-matching entry).
+		var patterns []string
+		if cfg.devOrigins {
+			patterns = []string{"localhost:*", "127.0.0.1:*", `\[::1\]:*`}
+		}
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: patterns})
 		if err != nil {
 			logger.Warn("exec websocket upgrade failed", "error", err)
 			return

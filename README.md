@@ -33,6 +33,7 @@ Auth is selected by `KUBESCOPE_AUTH_MODE`:
 |---|---|
 | `none` (default) | No authentication. Only appropriate on a trusted/loopback network. |
 | `basic` | HTTP Basic auth gates every route except `/healthz`. Requires `KUBESCOPE_AUTH_BASIC_USERNAME` and `KUBESCOPE_AUTH_BASIC_PASSWORD`; the server refuses to start if either is missing. |
+| `session` | A **sign-in page** and a 12-hour session cookie, with a sign-out button in the header. Requires `KUBESCOPE_AUTH_BASIC_PASSWORD`. `KUBESCOPE_AUTH_BASIC_USERNAME` is optional: unset means a password-only sign-in. See [ADR-0013](docs/adr/0013-session-sign-in-auth-mode.md). |
 | `oidc` | Reserved; **not implemented** in this release — selecting it fails fast at startup. |
 
 Enable Basic auth:
@@ -48,6 +49,18 @@ docker run --rm -p 8080:8080 \
 
 The browser prompts for credentials on first load. The password lives in the process environment, so treat that environment as sensitive (hashed/file-based credentials and OIDC are planned for a later release).
 
+For a sign-in page instead of the browser prompt, use session mode:
+
+```sh
+docker run --rm -p 8080:8080 \
+  -v ~/.kube/config:/kubeconfig:ro \
+  -e KUBESCOPE_AUTH_MODE=session \
+  -e KUBESCOPE_AUTH_BASIC_PASSWORD='choose-a-strong-password' \
+  ghcr.io/skriptvalley/kubescope:latest
+```
+
+The session cookie is HttpOnly, `SameSite=Strict` and scoped to Kubescope's own path (`KUBESCOPE_BASE_PATH`). It is `Secure` when served over TLS, and it expires server-side after 12 hours; open streams and shells end with it. Sessions survive restarts; changing the password (or `KUBESCOPE_AUTH_SESSION_KEY`, recommended when the password is shared) ends them all. Failed sign-ins are rate-limited (10, then 10 per minute).
+
 ## Configuration
 
 All configuration is via `KUBESCOPE_`-prefixed environment variables:
@@ -58,9 +71,10 @@ All configuration is via `KUBESCOPE_`-prefixed environment variables:
 | `KUBESCOPE_PORT` | — | Overrides only the **port** part of the listen address. |
 | `KUBESCOPE_KUBECONFIG` | `/kubeconfig` if present, else `$KUBECONFIG`, else `~/.kube/config` | Kubeconfig **source list**: colon-separated paths, each a file **or a directory** of kubeconfig files, merged with kubectl precedence (first occurrence of a name wins). A single path behaves as before. See [ADR-0008](docs/adr/0008-kubeconfig-source-registry.md). |
 | `KUBESCOPE_READ_ONLY` | `false` | When `true`, rejects all mutating operations server-side. |
-| `KUBESCOPE_AUTH_MODE` | `none` | `none` \| `basic` \| `oidc` (see Authentication). |
-| `KUBESCOPE_AUTH_BASIC_USERNAME` | — | Basic-auth username. Required when `KUBESCOPE_AUTH_MODE=basic`. |
-| `KUBESCOPE_AUTH_BASIC_PASSWORD` | — | Basic-auth password. Required when `KUBESCOPE_AUTH_MODE=basic`. Never logged. |
+| `KUBESCOPE_AUTH_MODE` | `none` | `none` \| `basic` \| `session` \| `oidc` (see Authentication). |
+| `KUBESCOPE_AUTH_BASIC_USERNAME` | — | Operator username. Required when `KUBESCOPE_AUTH_MODE=basic`; optional for `session` (unset = password-only sign-in). |
+| `KUBESCOPE_AUTH_BASIC_PASSWORD` | — | Operator password. Required when `KUBESCOPE_AUTH_MODE=basic` or `session`. Never logged. |
+| `KUBESCOPE_AUTH_SESSION_KEY` | — | Session mode only: an optional random secret mixed into session tokens, so a leaked cookie can't be brute-forced offline for the password. Recommended whenever the password is shared. Changing it signs everyone out. |
 | `KUBESCOPE_BASE_PATH` | — (root) | URL sub-path when served behind a reverse proxy, e.g. `/kubescope`. Works whether the proxy strips the prefix or not. See [Behind a reverse proxy](#behind-a-reverse-proxy-sub-path) and [ADR-0012](docs/adr/0012-sub-path-serving-behind-a-reverse-proxy.md). |
 | `KUBESCOPE_ALLOW_KUBECONFIG_SET` | `false` | When `true`, enables the kubeconfig **source registry** endpoints (`POST`/`DELETE /api/v1/kubeconfigs`) so the UI can add/remove kubeconfig sources — files or directories — at runtime (paths must be readable by the process — in Docker, under a mounted volume). Always rejected in read-only mode; changes are in-memory and a restart reverts to `KUBESCOPE_KUBECONFIG`. See [ADR-0008](docs/adr/0008-kubeconfig-source-registry.md). |
 
@@ -90,7 +104,7 @@ current-context: in-cluster
 
 If the Service is named `kubescope`, Kubernetes injects `KUBESCOPE_PORT=tcp://…` service-link variables into the pod. Kubescope ignores that shape, but `enableServiceLinks: false` on the pod keeps the environment clean.
 
-With `KUBESCOPE_AUTH_MODE=none` the authentication must come from the proxy (e.g. Traefik ForwardAuth). Use a NetworkPolicy so that only the proxy can reach the pod; otherwise any workload in the cluster can use Kubescope's credentials.
+Either use `KUBESCOPE_AUTH_MODE=session` (Kubescope's own sign-in page), or, with `KUBESCOPE_AUTH_MODE=none`, the authentication must come from the proxy (e.g. Traefik ForwardAuth). Use a NetworkPolicy so that only the proxy can reach the pod; otherwise any workload in the cluster can use Kubescope's credentials.
 
 ## Connecting to clusters
 

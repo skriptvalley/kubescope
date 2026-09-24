@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -49,18 +50,23 @@ type Options struct {
 	// middleware — the bypass-proof guardrail from ADR-0005. The UI reads the
 	// same flag from /api/v1/config to disable controls, but this is the control.
 	ReadOnly bool
-	// AuthMode is surfaced to the frontend via /api/v1/config (none|basic) and
-	// selects the auth middleware. "basic" gates every route (except /healthz)
-	// with HTTP Basic auth using the credentials below (ADR-0005).
+	// AuthMode is surfaced to the frontend via /api/v1/config and
+	// /api/v1/auth/session (none|basic|session) and selects the auth middleware.
+	// "basic" gates every route (except /healthz) with HTTP Basic auth using the
+	// credentials below (ADR-0005); "session" serves a sign-in page and gates the
+	// API with an expiring cookie (ADR-0013).
 	AuthMode string
 	// AllowKubeconfigSet enables the runtime set-kubeconfig endpoint (ADR-0007).
 	// When false the endpoint 403s; the setup endpoint reports canSetKubeconfig
 	// accordingly. Read-only mode keeps the control off regardless.
 	AllowKubeconfigSet bool
-	// BasicAuthUsername/BasicAuthPassword are enforced when AuthMode is "basic".
-	// Never logged.
+	// BasicAuthUsername/BasicAuthPassword are the operator credential for the
+	// "basic" and "session" modes (session: username optional). Never logged.
 	BasicAuthUsername string
 	BasicAuthPassword string
+	// SessionKey is the optional random secret mixed into session tokens
+	// (session mode, ADR-0013). Never logged.
+	SessionKey string
 	// Drain is closed when the server begins shutting down. The long-lived
 	// streaming routes cancel their request context on it so http.Server.Shutdown
 	// is not held open by SSE streams that never end on their own. Nil disables
@@ -96,7 +102,14 @@ func New(opts Options) http.Handler {
 	// ambient credential (Basic, or a proxy's session cookie) can't be ridden by
 	// another site's form (ADR-0012).
 	r.Use(crossOriginGuard())
-	r.Use(authGuard(opts.AuthMode, opts.BasicAuthUsername, opts.BasicAuthPassword, opts.Logger))
+	// API answers — including auth refusals — are live cluster state (and, on
+	// reveal, Secret values): never stored by the browser or an intermediate cache.
+	r.Use(noStoreAPI)
+	var session *sessionAuth
+	if opts.AuthMode == "session" {
+		session = newSessionAuth(opts.BasicAuthUsername, opts.BasicAuthPassword, opts.SessionKey, opts.BasePath, opts.Logger)
+	}
+	r.Use(authGuard(opts.AuthMode, opts.BasicAuthUsername, opts.BasicAuthPassword, session, opts.Logger))
 
 	r.Get("/healthz", healthz)
 
@@ -135,6 +148,13 @@ func New(opts Options) http.Handler {
 		// so the UI gates on one server-computed truth (ADR-0008).
 		canSetKubeconfig := opts.AllowKubeconfigSet && !opts.ReadOnly
 		api.Route("/v1", func(v1 chi.Router) {
+			// Sign-in state / sign-in / sign-out (ADR-0013). Session management, not
+			// cluster state, so it stays outside the read-only group; the auth guard
+			// lets this one route through unauthenticated.
+			sessGet, sessPost, sessDelete := sessionHandlers(opts.AuthMode, session, opts.Logger)
+			v1.Get("/auth/session", sessGet)
+			v1.Post("/auth/session", sessPost)
+			v1.Delete("/auth/session", sessDelete)
 			v1.Get("/nodes", resources.NodesHandler(opts.Kube, opts.Logger))
 			v1.Get("/contexts", resources.ContextsHandler(opts.Kube, opts.Logger))
 			v1.Post("/contexts/switch", resources.SwitchContextHandler(opts.Kube, opts.Logger))
@@ -229,7 +249,10 @@ func New(opts Options) http.Handler {
 				// read-only mode 403s them here. Exec is a WebSocket upgrade
 				// (ADR-0006); the guard rejects the request before it upgrades.
 				if opts.Exec != nil && opts.ExecSessions != nil {
-					m.Get("/stream/pods/{namespace}/{name}/exec", stream.ExecHandler(opts.Exec, opts.ExecSessions, opts.Logger))
+					// Dev-server origins (localhost:*) only when bound to loopback, i.e.
+					// `make dev` — never on an exposed/port-forwarded instance.
+					m.Get("/stream/pods/{namespace}/{name}/exec", stream.ExecHandler(opts.Exec, opts.ExecSessions, opts.Logger,
+						stream.WithDevOrigins(isLoopbackBind(opts.ListenAddr))))
 				}
 				if opts.PortForwards != nil {
 					m.Post("/portforwards", opts.PortForwards.CreateHandler())
@@ -305,6 +328,35 @@ func cutBase(p, base string) (string, bool) {
 		rest = "/"
 	}
 	return rest, true
+}
+
+// noStoreAPI marks every /api response as not to be kept by the browser or any
+// cache (the SPA shell sets its own no-cache; hashed assets stay cacheable).
+func noStoreAPI(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isAPIPath(r.URL.Path) {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isLoopbackBind reports a listen address bound to loopback only (the bare
+// binary's default) — the one setup where the Vite dev server fronts Kubescope.
+// An empty address (router-only tests) keeps the historical behaviour.
+func isLoopbackBind(listenAddr string) bool {
+	if listenAddr == "" {
+		return true
+	}
+	host, _, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.Trim(host, "[]")) {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
+	return false
 }
 
 func healthz(w http.ResponseWriter, _ *http.Request) {

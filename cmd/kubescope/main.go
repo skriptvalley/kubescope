@@ -80,6 +80,7 @@ func run(logger *slog.Logger) error {
 		AuthMode:           cfg.AuthMode,
 		BasicAuthUsername:  cfg.BasicAuthUsername,
 		BasicAuthPassword:  cfg.BasicAuthPassword,
+		SessionKey:         cfg.SessionKey,
 		AllowKubeconfigSet: cfg.AllowKubeconfigSet,
 		ListenAddr:         cfg.ListenAddr,
 		Dist:               web.Dist(),

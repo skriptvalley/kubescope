@@ -23,14 +23,19 @@ const (
 	// default false, so a running Kubescope cannot be repointed at another
 	// kubeconfig unless explicitly enabled.
 	EnvAllowKubeconfigSet = "KUBESCOPE_ALLOW_KUBECONFIG_SET"
-	// Basic-auth credential source (Sprint 8, ADR-0005). Only consulted when
-	// KUBESCOPE_AUTH_MODE=basic; both are required in that mode. A single
-	// operator/password pair is the v1 credential model — see ADR-0005.
+	// Operator credential (Sprint 8, ADR-0005; session mode ADR-0013). Consulted
+	// when KUBESCOPE_AUTH_MODE=basic (both required) or =session (password
+	// required, username optional — empty means a password-only sign-in). A
+	// single operator/password pair is the credential model — see ADR-0005.
 	EnvAuthBasicUsername = "KUBESCOPE_AUTH_BASIC_USERNAME"
 	EnvAuthBasicPassword = "KUBESCOPE_AUTH_BASIC_PASSWORD"
 	// EnvBasePath is the URL sub-path Kubescope is served under behind a reverse
 	// proxy (e.g. /kubescope), ADR-0012. Default "" = the host root.
 	EnvBasePath = "KUBESCOPE_BASE_PATH"
+	// EnvAuthSessionKey is an optional random secret mixed into the session-token
+	// key (session mode, ADR-0013): with it, a leaked cookie can't be brute-forced
+	// offline for the password, and tokens are bound to this deployment.
+	EnvAuthSessionKey = "KUBESCOPE_AUTH_SESSION_KEY"
 )
 
 const (
@@ -41,9 +46,10 @@ const (
 )
 
 // AuthMode values accepted by KUBESCOPE_AUTH_MODE. `none` and `basic` ship in
-// v1; `oidc` is a reserved value that fails fast at startup (not implemented)
-// so a config asking for it errors loudly rather than silently running open.
-var validAuthModes = map[string]bool{"none": true, "basic": true, "oidc": true}
+// v1, `session` (a sign-in page + expiring cookie, ADR-0013) in 1.2; `oidc` is a
+// reserved value that fails fast at startup (not implemented) so a config asking
+// for it errors loudly rather than silently running open.
+var validAuthModes = map[string]bool{"none": true, "basic": true, "session": true, "oidc": true}
 
 // Config is the validated runtime configuration.
 type Config struct {
@@ -56,12 +62,16 @@ type Config struct {
 	KubeconfigSources []string
 	// ReadOnly rejects all mutating operations server-side when true.
 	ReadOnly bool
-	// AuthMode is one of none|basic|oidc.
+	// AuthMode is one of none|basic|session (oidc is rejected at load).
 	AuthMode string
-	// BasicAuthUsername/BasicAuthPassword are the credentials enforced when
-	// AuthMode is "basic". Empty in every other mode. Never logged.
+	// BasicAuthUsername/BasicAuthPassword are the operator credential enforced
+	// when AuthMode is "basic" or "session" (the username may be empty in session
+	// mode). Empty in every other mode. Never logged.
 	BasicAuthUsername string
 	BasicAuthPassword string
+	// SessionKey is the optional session-token secret (session mode only). Never
+	// logged.
+	SessionKey string
 	// AllowKubeconfigSet enables the runtime set-kubeconfig endpoint (ADR-0007);
 	// default false.
 	AllowKubeconfigSet bool
@@ -132,7 +142,7 @@ func Load(opts ...Option) (Config, error) {
 	authMode := defaultAuthMode
 	if raw, ok := d.lookupEnv(EnvAuthMode); ok {
 		if !validAuthModes[raw] {
-			return Config{}, fmt.Errorf("parsing %s=%q: must be one of none|basic|oidc", EnvAuthMode, raw)
+			return Config{}, fmt.Errorf("parsing %s=%q: must be one of none|basic|session|oidc", EnvAuthMode, raw)
 		}
 		authMode = raw
 	}
@@ -140,11 +150,12 @@ func Load(opts ...Option) (Config, error) {
 	// oidc is reserved but not implemented in v1: fail fast at startup rather
 	// than fall back to running open (ADR-0005).
 	if authMode == "oidc" {
-		return Config{}, fmt.Errorf("%s=oidc is not implemented in this release; use 'none' or 'basic'", EnvAuthMode)
+		return Config{}, fmt.Errorf("%s=oidc is not implemented in this release; use 'none', 'basic' or 'session'", EnvAuthMode)
 	}
 
-	var basicUser, basicPass string
-	if authMode == "basic" {
+	var basicUser, basicPass, sessionKey string
+	switch authMode {
+	case "basic":
 		basicUser, _ = d.lookupEnv(EnvAuthBasicUsername)
 		basicPass, _ = d.lookupEnv(EnvAuthBasicPassword)
 		if basicUser == "" || basicPass == "" {
@@ -152,6 +163,17 @@ func Load(opts ...Option) (Config, error) {
 				"%s=basic requires both %s and %s to be set (non-empty)",
 				EnvAuthMode, EnvAuthBasicUsername, EnvAuthBasicPassword)
 		}
+	case "session":
+		// A sign-in page (ADR-0013): the password is required; a username is
+		// optional — unset means a password-only sign-in, like an admin console.
+		basicUser, _ = d.lookupEnv(EnvAuthBasicUsername)
+		basicPass, _ = d.lookupEnv(EnvAuthBasicPassword)
+		if basicPass == "" {
+			return Config{}, fmt.Errorf(
+				"%s=session requires %s to be set (non-empty); %s is optional",
+				EnvAuthMode, EnvAuthBasicPassword, EnvAuthBasicUsername)
+		}
+		sessionKey, _ = d.lookupEnv(EnvAuthSessionKey)
 	}
 
 	basePath := ""
@@ -171,6 +193,7 @@ func Load(opts ...Option) (Config, error) {
 		AuthMode:           authMode,
 		BasicAuthUsername:  basicUser,
 		BasicAuthPassword:  basicPass,
+		SessionKey:         sessionKey,
 		AllowKubeconfigSet: allowKubeconfigSet,
 	}, nil
 }

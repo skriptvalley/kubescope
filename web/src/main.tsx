@@ -1,10 +1,12 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 
+import { AuthGate } from "@/components/auth-gate";
 import { Layout } from "@/components/layout";
 import { routerBasename } from "@/lib/base";
+import { createQueryClient } from "@/lib/query-client";
 import { EventsPage } from "@/pages/events";
 import { NodesPage } from "@/pages/nodes";
 import { OverviewPage } from "@/pages/overview";
@@ -21,19 +23,17 @@ import "@fontsource-variable/geist-mono/wght.css";
 
 import "./index.css";
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
+// Global 401-"unauthenticated" handling lives in createQueryClient (ADR-0013).
+const queryClient = createQueryClient();
 
 const router = createBrowserRouter([
   {
     path: "/",
-    element: <Layout />,
+    element: (
+      <AuthGate>
+        <Layout />
+      </AuthGate>
+    ),
     children: [
       { index: true, element: <Navigate to="/overview" replace /> },
       { path: "overview", element: <OverviewPage /> },

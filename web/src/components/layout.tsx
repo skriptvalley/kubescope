@@ -1,4 +1,4 @@
-import { Lock } from "lucide-react";
+import { Lock, LogOut } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { Link, Outlet } from "react-router-dom";
 
@@ -11,6 +11,7 @@ import { Sidebar } from "@/components/sidebar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import wordmark from "@/assets/skriptvalley-wordmark.png";
 import { useServerConfig } from "@/hooks/use-config";
+import { useSessionState, useSignOut } from "@/hooks/use-session";
 import { useSetupState } from "@/hooks/use-setup";
 import { connectivity } from "@/lib/connectivity";
 import { StarterPage } from "@/pages/starter";
@@ -32,6 +33,7 @@ export function Layout() {
             <GlobalSearch />
             <ShortcutsHelp />
             <ThemeToggle />
+            <SignOutButton />
           </div>
         </div>
       </header>
@@ -45,6 +47,29 @@ export function Layout() {
       </div>
       <ActiveForwardsPanel />
     </div>
+  );
+}
+
+/** Sign-out, shown only in session mode (ADR-0013). */
+function SignOutButton() {
+  const session = useSessionState();
+  const signOut = useSignOut();
+  if (session?.mode !== "session") return null;
+  const failed = signOut.isError;
+  return (
+    <button
+      type="button"
+      onClick={() => signOut.mutate()}
+      disabled={signOut.isPending}
+      title={failed ? "Sign-out failed — you are still signed in. Try again." : "Sign out"}
+      aria-label={failed ? "Sign-out failed, try again" : "Sign out"}
+      className={
+        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-muted disabled:opacity-50 " +
+        (failed ? "text-destructive" : "text-muted-foreground hover:text-foreground")
+      }
+    >
+      <LogOut className="h-4 w-4" />
+    </button>
   );
 }
 

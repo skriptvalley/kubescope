@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -8,11 +8,17 @@ import { connectivity } from "@/lib/connectivity";
 import { Layout } from "./layout";
 
 const setupMock = vi.hoisted(() => vi.fn());
+const sessionStateMock = vi.hoisted(() => vi.fn());
+const signOutMock = vi.hoisted(() => vi.fn());
 
 // Keep the shell's data-fetching children inert; the gate logic under test lives
 // in Layout itself and only depends on the setup state + connectivity store.
 vi.mock("@/hooks/use-setup", () => ({ useSetupState: setupMock }));
 vi.mock("@/hooks/use-config", () => ({ useServerConfig: () => ({ data: { readOnly: false } }) }));
+vi.mock("@/hooks/use-session", () => ({
+  useSessionState: sessionStateMock,
+  useSignOut: () => ({ mutate: signOutMock, isPending: false }),
+}));
 vi.mock("@/components/sidebar", () => ({ Sidebar: () => null }));
 vi.mock("@/components/global-search", () => ({ GlobalSearch: () => null }));
 vi.mock("@/components/context-switcher", () => ({ ContextSwitcher: () => null }));
@@ -49,7 +55,26 @@ function setup(state: SetupState["state"] | undefined) {
 
 afterEach(() => {
   setupMock.mockReset();
+  sessionStateMock.mockReset();
+  signOutMock.mockReset();
   connectivity.resetForTests();
+});
+
+describe("Layout sign-out (ADR-0013)", () => {
+  it("offers sign-out only in session mode", () => {
+    setup("ready");
+    sessionStateMock.mockReturnValue({ mode: "session", authenticated: true, usernameRequired: false });
+    renderLayout();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(signOutMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["none", "basic"] as const)("has no sign-out in %s mode", (mode) => {
+    setup("ready");
+    sessionStateMock.mockReturnValue({ mode, authenticated: true, usernameRequired: false });
+    renderLayout();
+    expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
+  });
 });
 
 describe("Layout setup gate", () => {

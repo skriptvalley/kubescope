@@ -6,6 +6,32 @@ All notable changes to Kubescope are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-09-24
+
+### Added
+
+- **Session sign-in (FB-21, ADR-0013).** `KUBESCOPE_AUTH_MODE=session` adds a
+  Dusk-styled sign-in page, an expiring (12 h), HttpOnly, path-scoped session
+  cookie, and a sign-out button in the header. It replaces the browser's Basic
+  prompt with no new env vars: it uses the operator password
+  (`KUBESCOPE_AUTH_BASIC_PASSWORD`), and the username is optional (unset means
+  password-only). Sessions survive restarts; changing the password ends them. An
+  expired session anywhere in the app returns to the sign-in page, and signing
+  out drops every cached cluster response and mutation. Hardening:
+  - an optional `KUBESCOPE_AUTH_SESSION_KEY`, so a leaked cookie can't be
+    brute-forced offline for the password;
+  - failed sign-ins are rate-limited process-wide (`429` + `Retry-After`);
+  - the cookie is `SameSite=Strict`, and streams and shells end when their
+    session does;
+  - `/api` responses are `no-store`.
+
+### Security
+
+- **Exec WebSocket dev origins only on loopback.** `localhost:*` origins (the
+  Vite dev proxy) are now admitted only when Kubescope is bound to loopback. On
+  an exposed or port-forwarded instance, a page on another localhost port can no
+  longer open a pod shell with the operator's credentials (cookies ignore ports).
+
 ## [1.1.1] — 2026-09-24
 
 ### Fixed
