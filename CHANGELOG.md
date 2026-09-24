@@ -6,6 +6,17 @@ All notable changes to Kubescope are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-09-24
+
+### Fixed
+
+- **In-cluster startup crash when the Service is named `kubescope`.** Kubernetes
+  injects a service link `KUBESCOPE_PORT=tcp://<clusterIP>:<port>` into every pod
+  in the Service's namespace. Kubescope read it as its listen-port override and
+  exited with `invalid port`. A service-link-shaped value is now ignored with a
+  startup warning; a real `KUBESCOPE_PORT` still applies. (Setting
+  `enableServiceLinks: false` on the pod also avoids it.)
+
 ## [1.1.0] — 2026-09-24
 
 ### Added
