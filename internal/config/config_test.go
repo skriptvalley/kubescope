@@ -188,6 +188,28 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
+			name: "auth mode session with a session key",
+			env: map[string]string{
+				EnvAuthMode:          "session",
+				EnvAuthBasicPassword: "s3cret",
+				EnvAuthSessionKey:    "k3y",
+			},
+			want: Config{
+				ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/home/u/.kube/config"},
+				AuthMode: "session", BasicAuthPassword: "s3cret", SessionKey: "k3y",
+			},
+		},
+		{
+			name: "session key ignored outside session mode",
+			env: map[string]string{
+				EnvAuthMode: "basic", EnvAuthBasicUsername: "admin", EnvAuthBasicPassword: "s3cret", EnvAuthSessionKey: "k3y",
+			},
+			want: Config{
+				ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/home/u/.kube/config"},
+				AuthMode: "basic", BasicAuthUsername: "admin", BasicAuthPassword: "s3cret",
+			},
+		},
+		{
 			name:    "auth mode session without password rejected",
 			env:     map[string]string{EnvAuthMode: "session", EnvAuthBasicUsername: "admin"},
 			wantErr: "session requires",

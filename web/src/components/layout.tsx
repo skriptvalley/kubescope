@@ -55,14 +55,18 @@ function SignOutButton() {
   const session = useSessionState();
   const signOut = useSignOut();
   if (session?.mode !== "session") return null;
+  const failed = signOut.isError;
   return (
     <button
       type="button"
       onClick={() => signOut.mutate()}
       disabled={signOut.isPending}
-      title="Sign out"
-      aria-label="Sign out"
-      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+      title={failed ? "Sign-out failed — you are still signed in. Try again." : "Sign out"}
+      aria-label={failed ? "Sign-out failed, try again" : "Sign out"}
+      className={
+        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-muted disabled:opacity-50 " +
+        (failed ? "text-destructive" : "text-muted-foreground hover:text-foreground")
+      }
     >
       <LogOut className="h-4 w-4" />
     </button>

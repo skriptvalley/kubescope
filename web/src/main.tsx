@@ -1,4 +1,4 @@
-import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
@@ -6,7 +6,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom"
 import { AuthGate } from "@/components/auth-gate";
 import { Layout } from "@/components/layout";
 import { routerBasename } from "@/lib/base";
-import { handleAuthError, retryUnlessUnauthenticated } from "@/lib/session";
+import { createQueryClient } from "@/lib/query-client";
 import { EventsPage } from "@/pages/events";
 import { NodesPage } from "@/pages/nodes";
 import { OverviewPage } from "@/pages/overview";
@@ -23,18 +23,8 @@ import "@fontsource-variable/geist-mono/wght.css";
 
 import "./index.css";
 
-// Any API answer of 401 "unauthenticated" (an expired or cleared session,
-// ADR-0013) flips the cached sign-in state, and AuthGate shows the sign-in page.
-const queryClient: QueryClient = new QueryClient({
-  queryCache: new QueryCache({ onError: (error) => handleAuthError(queryClient, error) }),
-  mutationCache: new MutationCache({ onError: (error) => handleAuthError(queryClient, error) }),
-  defaultOptions: {
-    queries: {
-      retry: retryUnlessUnauthenticated,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
+// Global 401-"unauthenticated" handling lives in createQueryClient (ADR-0013).
+const queryClient = createQueryClient();
 
 const router = createBrowserRouter([
   {

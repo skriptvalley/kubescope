@@ -27,3 +27,27 @@ export function handleAuthError(queryClient: QueryClient, error: unknown): void 
 export function retryUnlessUnauthenticated(failureCount: number, error: unknown): boolean {
   return !isUnauthenticated(error) && failureCount < 1;
 }
+
+/** Thrown when the server accepted the password but the browser didn't keep the
+ *  session cookie (blocked cookies, or a stray same-named cookie shadowing it). */
+export class CookieNotKeptError extends Error {
+  constructor() {
+    super("signed in, but the browser did not keep the session cookie");
+    this.name = "CookieNotKeptError";
+  }
+}
+
+/** A human reason for a failed sign-in, by what actually went wrong. */
+export function signInErrorMessage(error: unknown, usernameRequired: boolean): string {
+  if (error instanceof CookieNotKeptError) {
+    return "The server accepted the password, but your browser didn't keep the session cookie. Allow cookies for this site (or clear old kubescope_session cookies) and try again.";
+  }
+  if (error instanceof ApiError) {
+    if (error.status === 401) return usernameRequired ? "Wrong username or password." : "Wrong password.";
+    if (error.status === 429) return "Too many failed sign-ins — wait a minute, then try again.";
+    if (error.status === 403) return "The request was blocked (cross-origin). Open Kubescope from its own address.";
+    if (error.status >= 500) return "The server hit an error — try again shortly.";
+    return `Sign-in failed: ${error.message}`;
+  }
+  return "Couldn't reach the Kubescope server — check the connection and try again.";
+}

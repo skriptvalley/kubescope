@@ -28,7 +28,19 @@ const healthzPath = "/healthz"
 // logs only the path, remote address, and whether any credentials were presented
 // — never the submitted username or password.
 func authGuard(mode, username, password string, session *sessionAuth, logger *slog.Logger) func(http.Handler) http.Handler {
-	if mode == "session" && session != nil {
+	if mode == "session" {
+		if session == nil {
+			// A wiring bug must fail closed, never run the API open.
+			return func(http.Handler) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == healthzPath {
+						healthz(w, r)
+						return
+					}
+					writeJSONError(w, http.StatusServiceUnavailable, "auth_misconfigured", "session auth is not initialised")
+				})
+			}
+		}
 		// Sign-in page + session cookie (ADR-0013); see sessionAuth.guard.
 		return session.guard
 	}

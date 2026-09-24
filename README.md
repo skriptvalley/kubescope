@@ -59,7 +59,7 @@ docker run --rm -p 8080:8080 \
   ghcr.io/skriptvalley/kubescope:latest
 ```
 
-The session cookie is HttpOnly, `SameSite=Lax` and scoped to Kubescope's own path (`KUBESCOPE_BASE_PATH`). It is `Secure` when served over TLS, and it expires server-side after 12 hours. Sessions survive restarts; changing the password ends them all.
+The session cookie is HttpOnly, `SameSite=Strict` and scoped to Kubescope's own path (`KUBESCOPE_BASE_PATH`). It is `Secure` when served over TLS, and it expires server-side after 12 hours; open streams and shells end with it. Sessions survive restarts; changing the password (or `KUBESCOPE_AUTH_SESSION_KEY`, recommended when the password is shared) ends them all. Failed sign-ins are rate-limited (10, then 10 per minute).
 
 ## Configuration
 
@@ -74,6 +74,7 @@ All configuration is via `KUBESCOPE_`-prefixed environment variables:
 | `KUBESCOPE_AUTH_MODE` | `none` | `none` \| `basic` \| `session` \| `oidc` (see Authentication). |
 | `KUBESCOPE_AUTH_BASIC_USERNAME` | — | Operator username. Required when `KUBESCOPE_AUTH_MODE=basic`; optional for `session` (unset = password-only sign-in). |
 | `KUBESCOPE_AUTH_BASIC_PASSWORD` | — | Operator password. Required when `KUBESCOPE_AUTH_MODE=basic` or `session`. Never logged. |
+| `KUBESCOPE_AUTH_SESSION_KEY` | — | Session mode only: an optional random secret mixed into session tokens, so a leaked cookie can't be brute-forced offline for the password. Recommended whenever the password is shared. Changing it signs everyone out. |
 | `KUBESCOPE_BASE_PATH` | — (root) | URL sub-path when served behind a reverse proxy, e.g. `/kubescope`. Works whether the proxy strips the prefix or not. See [Behind a reverse proxy](#behind-a-reverse-proxy-sub-path) and [ADR-0012](docs/adr/0012-sub-path-serving-behind-a-reverse-proxy.md). |
 | `KUBESCOPE_ALLOW_KUBECONFIG_SET` | `false` | When `true`, enables the kubeconfig **source registry** endpoints (`POST`/`DELETE /api/v1/kubeconfigs`) so the UI can add/remove kubeconfig sources — files or directories — at runtime (paths must be readable by the process — in Docker, under a mounted volume). Always rejected in read-only mode; changes are in-memory and a restart reverts to `KUBESCOPE_KUBECONFIG`. See [ADR-0008](docs/adr/0008-kubeconfig-source-registry.md). |
 

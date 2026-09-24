@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, type SessionState } from "@/lib/api";
-import { sessionQueryKey } from "@/lib/session";
+import { api, type SessionState, type SignInParams } from "@/lib/api";
+import { CookieNotKeptError, sessionQueryKey } from "@/lib/session";
 
 /** The server's sign-in state (ADR-0013). Fetched once; flipped to signed-out by
  *  the query client when any API call answers 401 unauthenticated. */
@@ -25,33 +25,43 @@ export function useSessionState(): SessionState | undefined {
   }).data;
 }
 
-/** Signs in; on success the session cache flips and the gated app mounts. */
+/** Signs in, then confirms the cookie actually stuck before letting the gated
+ *  app mount — otherwise the first API call would 401 straight back to the
+ *  sign-in page in a silent loop. gcTime 0: the mutation (and the password in
+ *  its variables) leaves the cache as soon as the sign-in page unmounts. */
 export function useSignIn() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: api.session.signIn,
+    mutationFn: async (params: SignInParams) => {
+      await api.session.signIn(params);
+      const state = await api.session.get();
+      if (!state.authenticated) throw new CookieNotKeptError();
+      return state;
+    },
+    gcTime: 0,
     onSuccess: (state) => {
       queryClient.setQueryData<SessionState>(sessionQueryKey, state);
     },
   });
 }
 
-/** Signs out and drops every cached cluster response, so nothing read under the
- *  session lingers in memory behind the sign-in page. */
+/** Signs out. Only a confirmed sign-out flips the gate and drops every cached
+ *  response and mutation (so nothing read or typed under the session lingers in
+ *  memory); a failed one re-checks the real state instead of pretending. */
 export function useSignOut() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: api.session.signOut,
-    onSettled: (state) => {
-      const prev = queryClient.getQueryData<SessionState>(sessionQueryKey);
+    mutationFn: () => api.session.signOut(),
+    onSuccess: (state) => {
       // Flip the session first (the gate swaps in the sign-in page), then drop
-      // every other cached response. Not clear(): that would orphan the gate's
-      // own session observer, which then never sees the signed-out state.
-      queryClient.setQueryData<SessionState>(
-        sessionQueryKey,
-        state ?? { mode: "session", authenticated: false, usernameRequired: prev?.usernameRequired ?? false },
-      );
+      // the rest. Not clear(): that would orphan the gate's own session
+      // observer, which then never sees the signed-out state.
+      queryClient.setQueryData<SessionState>(sessionQueryKey, state);
       queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== sessionQueryKey[0] });
+      queryClient.getMutationCache().clear();
+    },
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: sessionQueryKey });
     },
   });
 }

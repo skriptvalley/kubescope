@@ -272,6 +272,33 @@ func TestExecHandlerReportsResolutionErrorOverSocket(t *testing.T) {
 	assert.Equal(t, websocket.StatusInternalError, websocket.CloseStatus(err))
 }
 
+// Dev origins (localhost on any port — the Vite proxy) are admitted only when
+// enabled; otherwise only same-origin pages may open a shell, so a page on
+// another localhost port can't ride a session cookie into a port-forwarded
+// instance (cookies ignore ports).
+func TestExecHandlerDevOrigins(t *testing.T) {
+	cluster := &fakeExecCluster{cs: fake.NewClientset(), restErr: errors.New("stop after upgrade")}
+	for _, tc := range []struct {
+		allow  bool
+		wantOK bool
+	}{{allow: true, wantOK: true}, {allow: false, wantOK: false}} {
+		r := chi.NewRouter()
+		r.Get("/exec/pods/{namespace}/{name}/exec", ExecHandler(cluster, NewExecRegistry(), discardLogger(), WithDevOrigins(tc.allow)))
+		srv := httptest.NewServer(r)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http")+"/exec/pods/default/web/exec",
+			&websocket.DialOptions{HTTPHeader: http.Header{"Origin": {"http://localhost:5173"}}})
+		if tc.wantOK {
+			require.NoError(t, err, "dev origin admitted when allowed")
+			_ = c.CloseNow()
+		} else {
+			require.Error(t, err, "dev origin refused when not allowed")
+		}
+		cancel()
+		srv.Close()
+	}
+}
+
 func TestExecRegistryTeardown(t *testing.T) {
 	reg := NewExecRegistry()
 	a := reg.add("ctx-a", context.Background())

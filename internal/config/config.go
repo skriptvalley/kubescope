@@ -32,6 +32,10 @@ const (
 	// EnvBasePath is the URL sub-path Kubescope is served under behind a reverse
 	// proxy (e.g. /kubescope), ADR-0012. Default "" = the host root.
 	EnvBasePath = "KUBESCOPE_BASE_PATH"
+	// EnvAuthSessionKey is an optional random secret mixed into the session-token
+	// key (session mode, ADR-0013): with it, a leaked cookie can't be brute-forced
+	// offline for the password, and tokens are bound to this deployment.
+	EnvAuthSessionKey = "KUBESCOPE_AUTH_SESSION_KEY"
 )
 
 const (
@@ -65,6 +69,9 @@ type Config struct {
 	// mode). Empty in every other mode. Never logged.
 	BasicAuthUsername string
 	BasicAuthPassword string
+	// SessionKey is the optional session-token secret (session mode only). Never
+	// logged.
+	SessionKey string
 	// AllowKubeconfigSet enables the runtime set-kubeconfig endpoint (ADR-0007);
 	// default false.
 	AllowKubeconfigSet bool
@@ -146,7 +153,7 @@ func Load(opts ...Option) (Config, error) {
 		return Config{}, fmt.Errorf("%s=oidc is not implemented in this release; use 'none', 'basic' or 'session'", EnvAuthMode)
 	}
 
-	var basicUser, basicPass string
+	var basicUser, basicPass, sessionKey string
 	switch authMode {
 	case "basic":
 		basicUser, _ = d.lookupEnv(EnvAuthBasicUsername)
@@ -166,6 +173,7 @@ func Load(opts ...Option) (Config, error) {
 				"%s=session requires %s to be set (non-empty); %s is optional",
 				EnvAuthMode, EnvAuthBasicPassword, EnvAuthBasicUsername)
 		}
+		sessionKey, _ = d.lookupEnv(EnvAuthSessionKey)
 	}
 
 	basePath := ""
@@ -185,6 +193,7 @@ func Load(opts ...Option) (Config, error) {
 		AuthMode:           authMode,
 		BasicAuthUsername:  basicUser,
 		BasicAuthPassword:  basicPass,
+		SessionKey:         sessionKey,
 		AllowKubeconfigSet: allowKubeconfigSet,
 	}, nil
 }

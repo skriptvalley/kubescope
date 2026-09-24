@@ -1,9 +1,10 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSignOut } from "@/hooks/use-session";
 import { ApiError, type SessionState } from "@/lib/api";
+import { createQueryClient } from "@/lib/query-client";
 import { handleAuthError, retryUnlessUnauthenticated, sessionQueryKey } from "@/lib/session";
 
 import { AuthGate } from "./auth-gate";
@@ -32,13 +33,13 @@ function SignOutProbe() {
   );
 }
 
-function renderGate() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderGate(queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }), extra?: React.ReactNode) {
   render(
     <QueryClientProvider client={queryClient}>
       <AuthGate>
         <div data-testid="app">app</div>
         <SignOutProbe />
+        {extra}
       </AuthGate>
     </QueryClientProvider>,
   );
@@ -68,8 +69,8 @@ describe("AuthGate (ADR-0013)", () => {
     expect(await screen.findByTestId("app")).toBeInTheDocument();
   });
 
-  it("signs in and then mounts the app", async () => {
-    getMock.mockResolvedValue(signedOut);
+  it("signs in, confirms the cookie stuck, then mounts the app", async () => {
+    getMock.mockResolvedValueOnce(signedOut).mockResolvedValue({ ...signedOut, authenticated: true });
     signInMock.mockResolvedValue({ ...signedOut, authenticated: true });
     renderGate();
     fireEvent.change(await screen.findByLabelText("Password"), { target: { value: "hunter2" } });
@@ -79,7 +80,9 @@ describe("AuthGate (ADR-0013)", () => {
   });
 
   it("asks for a username when the server requires one", async () => {
-    getMock.mockResolvedValue({ ...signedOut, usernameRequired: true });
+    getMock
+      .mockResolvedValueOnce({ ...signedOut, usernameRequired: true })
+      .mockResolvedValue({ ...signedOut, usernameRequired: true, authenticated: true });
     signInMock.mockResolvedValue({ ...signedOut, usernameRequired: true, authenticated: true });
     renderGate();
     fireEvent.change(await screen.findByLabelText("Username"), { target: { value: "admin" } });
@@ -100,16 +103,85 @@ describe("AuthGate (ADR-0013)", () => {
     expect(screen.queryByTestId("app")).toBeNull();
   });
 
+  it("explains a sign-in whose cookie the browser didn't keep, instead of looping", async () => {
+    getMock.mockResolvedValue(signedOut); // still signed out after a 'successful' POST
+    signInMock.mockResolvedValue({ ...signedOut, authenticated: true });
+    renderGate();
+    fireEvent.change(await screen.findByLabelText("Password"), { target: { value: "hunter2" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/didn't keep the session cookie/);
+    expect(screen.queryByTestId("app")).toBeNull();
+  });
+
+  it("names a rate-limited sign-in and keeps focus on the form", async () => {
+    getMock.mockResolvedValue(signedOut);
+    signInMock.mockRejectedValue(new ApiError("too many failed sign-ins", "rate_limited", 429));
+    renderGate();
+    const pw = await screen.findByLabelText("Password");
+    fireEvent.change(pw, { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: /sign in/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Too many failed sign-ins/);
+    expect(pw).toHaveFocus();
+    expect(pw).toHaveAttribute("aria-describedby", screen.getByRole("alert").id);
+  });
+
+  it("asks for the password instead of disabling the button", async () => {
+    getMock.mockResolvedValue(signedOut);
+    renderGate();
+    const button = await screen.findByRole("button", { name: /sign in/i });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter the password.");
+    expect(signInMock).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Password")).toHaveFocus();
+  });
+
+  it("keeps the app when a background session refetch fails", async () => {
+    getMock.mockResolvedValueOnce({ ...signedOut, authenticated: true }).mockRejectedValue(new Error("network down"));
+    const queryClient = renderGate();
+    expect(await screen.findByTestId("app")).toBeInTheDocument();
+    void queryClient.invalidateQueries(); // e.g. a context switch
+    await waitFor(() => expect(queryClient.getQueryState(sessionQueryKey)?.status).toBe("error"), { timeout: 4000 });
+    expect(screen.getByTestId("app")).toBeInTheDocument();
+  });
+
+  it("stays signed in (and shows the app) when sign-out fails", async () => {
+    getMock.mockResolvedValue({ ...signedOut, authenticated: true });
+    signOutMock.mockRejectedValue(new Error("network down"));
+    const queryClient = renderGate();
+    expect(await screen.findByTestId("app")).toBeInTheDocument();
+    queryClient.setQueryData(["resource-list", "core", "v1", "pods", ""], { items: ["kept"] });
+    fireEvent.click(screen.getByRole("button", { name: "probe sign out" }));
+    await waitFor(() => expect(signOutMock).toHaveBeenCalled());
+    await waitFor(() => expect(getMock).toHaveBeenCalledTimes(2)); // re-checked the real state
+    expect(screen.getByTestId("app")).toBeInTheDocument();
+    expect(queryClient.getQueryData(["resource-list", "core", "v1", "pods", ""])).toEqual({ items: ["kept"] });
+  });
+
   it("signs out: shows the sign-in page and drops cached cluster data", async () => {
     getMock.mockResolvedValue({ ...signedOut, authenticated: true });
     signOutMock.mockResolvedValue(signedOut);
     const queryClient = renderGate();
     expect(await screen.findByTestId("app")).toBeInTheDocument();
     queryClient.setQueryData(["resource-list", "core", "v1", "secrets", ""], { items: ["cached"] });
+    queryClient.getMutationCache().build(queryClient, { mutationKey: ["yaml-apply"] });
     fireEvent.click(screen.getByRole("button", { name: "probe sign out" }));
     expect(await screen.findByTestId("sign-in-page")).toBeInTheDocument();
     expect(queryClient.getQueryData(["resource-list", "core", "v1", "secrets", ""])).toBeUndefined();
+    expect(queryClient.getMutationCache().getAll()).toHaveLength(0);
     expect(queryClient.getQueryData<SessionState>(sessionQueryKey)?.authenticated).toBe(false);
+  });
+
+  it("the app's query client sends any 'unauthenticated' API answer back to sign-in", async () => {
+    getMock.mockResolvedValue({ ...signedOut, authenticated: true });
+    const failing = vi.fn().mockRejectedValue(new ApiError("sign in required", "unauthenticated", 401));
+    function Probe() {
+      useQuery({ queryKey: ["nodes"], queryFn: failing });
+      return null;
+    }
+    renderGate(createQueryClient(), <Probe />);
+    expect(await screen.findByTestId("sign-in-page")).toBeInTheDocument();
+    expect(failing).toHaveBeenCalledTimes(1); // never retried
   });
 
   it("returns to the sign-in page when any API call reports the session gone", async () => {
