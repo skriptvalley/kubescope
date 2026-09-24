@@ -17,6 +17,7 @@ Decisions that lock Kubescope's technical direction. Referenced from [../ARCHITE
 | 0009 | [Adopt the skriptvalley "Dusk" design system](0009-dusk-design-system.md) | Accepted | 2026-07-21 |
 | 0010 | [EKS e2e via a host-minted static token-kubeconfig](0010-e2e-eks-static-token-kubeconfig.md) | Accepted | 2026-07-21 |
 | 0011 | [Resource relationship graph: Cytoscape.js + fcose, namespace-scoped and focus-bounded](0011-resource-graph-cytoscape-fcose.md) | Accepted | 2026-07-26 |
+| 0012 | [Sub-path serving behind a reverse proxy (`KUBESCOPE_BASE_PATH`)](0012-sub-path-serving-behind-a-reverse-proxy.md) | Accepted | 2026-09-24 |
 
 ## Template (MADR-style)
 

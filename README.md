@@ -61,7 +61,34 @@ All configuration is via `KUBESCOPE_`-prefixed environment variables:
 | `KUBESCOPE_AUTH_MODE` | `none` | `none` \| `basic` \| `oidc` (see Authentication). |
 | `KUBESCOPE_AUTH_BASIC_USERNAME` | — | Basic-auth username. Required when `KUBESCOPE_AUTH_MODE=basic`. |
 | `KUBESCOPE_AUTH_BASIC_PASSWORD` | — | Basic-auth password. Required when `KUBESCOPE_AUTH_MODE=basic`. Never logged. |
+| `KUBESCOPE_BASE_PATH` | — (root) | URL sub-path when served behind a reverse proxy, e.g. `/kubescope`. Works whether the proxy strips the prefix or not. See [Behind a reverse proxy](#behind-a-reverse-proxy-sub-path) and [ADR-0012](docs/adr/0012-sub-path-serving-behind-a-reverse-proxy.md). |
 | `KUBESCOPE_ALLOW_KUBECONFIG_SET` | `false` | When `true`, enables the kubeconfig **source registry** endpoints (`POST`/`DELETE /api/v1/kubeconfigs`) so the UI can add/remove kubeconfig sources — files or directories — at runtime (paths must be readable by the process — in Docker, under a mounted volume). Always rejected in read-only mode; changes are in-memory and a restart reverts to `KUBESCOPE_KUBECONFIG`. See [ADR-0008](docs/adr/0008-kubeconfig-source-registry.md). |
+
+## Behind a reverse proxy (sub-path)
+
+To serve Kubescope at a path such as `https://tools.example.com/kubescope/`, set `KUBESCOPE_BASE_PATH=/kubescope`. The proxy may strip the prefix (Traefik `stripPrefix`) or forward it unchanged — both work. Redirect the bare `/kubescope` to `/kubescope/`, and let the proxy pass WebSocket upgrades (exec) and unbuffered responses (SSE live updates and logs).
+
+**In-cluster** (e.g. on k3s behind Traefik), mount a kubeconfig that uses the pod's ServiceAccount, and bind that ServiceAccount to the RBAC you want Kubescope to have:
+
+```yaml
+apiVersion: v1
+kind: Config
+clusters:
+  - name: in-cluster
+    cluster:
+      server: https://kubernetes.default.svc
+      certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+users:
+  - name: kubescope
+    user:
+      tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token   # re-read as it rotates
+contexts:
+  - name: in-cluster
+    context: { cluster: in-cluster, user: kubescope }
+current-context: in-cluster
+```
+
+With `KUBESCOPE_AUTH_MODE=none` the authentication must come from the proxy (e.g. Traefik ForwardAuth). Use a NetworkPolicy so that only the proxy can reach the pod; otherwise any workload in the cluster can use Kubescope's credentials.
 
 ## Connecting to clusters
 

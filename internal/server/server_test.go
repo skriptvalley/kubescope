@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -216,4 +217,75 @@ func TestSPAWithoutEmbeddedBuild(t *testing.T) {
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	assert.Contains(t, rec.Body.String(), "make build")
+}
+
+// shellFixture is a Vite-shaped index (relative asset URLs, ADR-0012).
+func shellFixture() fstest.MapFS {
+	return fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte(
+			`<!doctype html><html lang="en"><head><meta charset="UTF-8" /><script type="module" crossorigin src="./assets/app-abc12.js"></script></head><body><div id="root"></div></body></html>`)},
+		"assets/app-abc12.js": &fstest.MapFile{Data: []byte("console.log('app')")},
+	}
+}
+
+func basePathServer(t *testing.T, base string) http.Handler {
+	t.Helper()
+	return New(Options{
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Kube:     &fakeProvider{clientset: fake.NewClientset()},
+		Dist:     shellFixture(),
+		BasePath: base,
+	})
+}
+
+// Behind a sub-path (ADR-0012) every route answers whether the proxy strips the
+// prefix or forwards it as-is, and the shell carries the matching <base href> as
+// the first element of <head> so relative assets resolve from any deep link.
+func TestBasePathRouting(t *testing.T) {
+	srv := basePathServer(t, "/kubescope")
+	const baseTag = `<head><base href="/kubescope/">`
+	tests := []struct {
+		name, path, want string
+	}{
+		{"prefixed root", "/kubescope/", baseTag},
+		{"prefixed root without slash", "/kubescope", baseTag},
+		{"stripped root", "/", baseTag},
+		{"prefixed deep link", "/kubescope/resources/core/v1/pods/default/web", baseTag},
+		{"stripped deep link", "/resources/core/v1/pods/default/web", baseTag},
+		{"prefixed asset", "/kubescope/assets/app-abc12.js", "console.log('app')"},
+		{"stripped asset", "/assets/app-abc12.js", "console.log('app')"},
+		{"prefixed api", "/kubescope/api/v1/nodes", `{"items":[]}`},
+		{"stripped api", "/api/v1/nodes", `{"items":[]}`},
+		{"prefixed healthz", "/kubescope/healthz", `{"status":"ok"}`},
+		{"stripped healthz", "/healthz", `{"status":"ok"}`},
+		{"look-alike prefix is not stripped", "/kubescopex/api/v1/nodes", baseTag},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Contains(t, rec.Body.String(), tt.want)
+		})
+	}
+
+	t.Run("prefixed unknown api is still a json 404", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/kubescope/api/v1/nope", nil))
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+		assert.Contains(t, rec.Body.String(), "not_found")
+	})
+}
+
+func TestBaseHrefAtRoot(t *testing.T) {
+	rec := httptest.NewRecorder()
+	basePathServer(t, "").ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/resources/core/v1/pods", nil))
+	body := rec.Body.String()
+	assert.Contains(t, body, `<head><base href="/">`, "a deep link at the root still needs base=/ for relative assets")
+	assert.Equal(t, 1, strings.Count(body, "<base "), "exactly one base tag")
+}
+
+func TestWithBaseHrefLeavesNonShellUntouched(t *testing.T) {
+	in := []byte("<html>kubescope spa</html>")
+	assert.Equal(t, in, withBaseHref(in, "/kubescope"))
 }

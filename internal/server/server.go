@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -71,6 +72,12 @@ type Options struct {
 	ListenAddr string
 	// Dist is the built SPA (index.html at its root).
 	Dist fs.FS
+	// BasePath is the URL sub-path the UI is served under behind a reverse proxy
+	// ("" = root, else "/kubescope" — normalized by config, ADR-0012). The served
+	// index.html gets a matching <base href> so the SPA's assets, router and
+	// API/SSE/WebSocket URLs resolve under it, and requests are accepted both with
+	// the prefix still on (a proxy that forwards as-is) and already stripped.
+	BasePath string
 }
 
 // New builds the top-level HTTP handler.
@@ -245,9 +252,39 @@ func New(opts Options) http.Handler {
 
 	// Everything else is the SPA: real files as-is, unknown paths fall back
 	// to index.html for client-side routing.
-	r.NotFound(spaHandler(opts.Dist).ServeHTTP)
+	r.NotFound(spaHandler(opts.Dist, opts.BasePath).ServeHTTP)
 
-	return r
+	return stripBasePath(opts.BasePath, r)
+}
+
+// stripBasePath lets Kubescope run under a sub-path whether or not the reverse
+// proxy strips it (ADR-0012): a request still carrying the prefix has it removed
+// before routing; one that arrives already stripped passes through unchanged. The
+// config layer rejects prefixes that would shadow the server's own top-level
+// routes, so the two cases cannot be confused.
+func stripBasePath(base string, next http.Handler) http.Handler {
+	if base == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rest, ok := strings.CutPrefix(r.URL.Path, base)
+		if ok && (rest == "" || rest[0] == '/') {
+			r2 := r.Clone(r.Context())
+			if rest == "" {
+				rest = "/"
+			}
+			r2.URL.Path = rest
+			r2.URL.RawPath = ""
+			// chi routes on RawPath when set; an escaped path keeps its escaping
+			// minus the prefix (base has only unreserved characters).
+			if raw, ok := strings.CutPrefix(r.URL.RawPath, base); ok && raw != "" {
+				r2.URL.RawPath = raw
+			}
+			next.ServeHTTP(w, r2)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func healthz(w http.ResponseWriter, _ *http.Request) {

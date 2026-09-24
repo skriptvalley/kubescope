@@ -20,6 +20,9 @@ export default defineConfig({
       "/healthz": backend,
     },
   },
+  // Relative asset URLs: the server's injected <base href> (KUBESCOPE_BASE_PATH,
+  // ADR-0012) anchors them, so one build serves at the root or under a sub-path.
+  base: "./",
   build: {
     outDir: "dist",
   },
