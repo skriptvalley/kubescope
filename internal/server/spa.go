@@ -1,10 +1,10 @@
 package server
 
 import (
-	"bytes"
 	"html"
 	"io/fs"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -44,6 +44,9 @@ func serveIndex(w http.ResponseWriter, r *http.Request, dist fs.FS, basePath str
 	_, _ = w.Write(index)
 }
 
+// headOpen matches the <head> start tag, with or without attributes.
+var headOpen = regexp.MustCompile(`(?i)<head(?:\s[^>]*)?>`)
+
 // withBaseHref inserts <base href="<basePath>/"> as the first element of <head>
 // (ADR-0012). The build emits relative asset URLs (Vite base "./"), so this one
 // tag makes them — and the SPA's router basename and API/SSE/WebSocket URLs,
@@ -52,12 +55,11 @@ func serveIndex(w http.ResponseWriter, r *http.Request, dist fs.FS, basePath str
 // (/resources/core/v1/pods) would otherwise resolve under that route.
 func withBaseHref(index []byte, basePath string) []byte {
 	tag := []byte(`<base href="` + html.EscapeString(basePath+"/") + `">`)
-	head := []byte("<head>")
-	i := bytes.Index(index, head)
-	if i < 0 {
+	loc := headOpen.FindIndex(index)
+	if loc == nil {
 		return index // not a normal document shell; serve untouched
 	}
-	at := i + len(head)
+	at := loc[1]
 	out := make([]byte, 0, len(index)+len(tag))
 	out = append(out, index[:at]...)
 	out = append(out, tag...)

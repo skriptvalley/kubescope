@@ -224,9 +224,7 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-// TestStatExistsAcceptsFileAndDirectory pins the ADR-0008 change to the default
-// existence probe: the container mount point resolves whether it is a file or a
-// directory, and a truly absent path still reports missing.
+// TestLoadBasePath covers KUBESCOPE_BASE_PATH normalization and validation (ADR-0012).
 func TestLoadBasePath(t *testing.T) {
 	tests := []struct {
 		raw     string
@@ -265,6 +263,9 @@ func TestLoadBasePath(t *testing.T) {
 	assert.Equal(t, "", cfg.BasePath, "unset serves at the root")
 }
 
+// TestStatExistsAcceptsFileAndDirectory pins the ADR-0008 change to the default
+// existence probe: the container mount point resolves whether it is a file or a
+// directory, and a truly absent path still reports missing.
 func TestStatExistsAcceptsFileAndDirectory(t *testing.T) {
 	dir := t.TempDir()
 	file := dir + "/kubeconfig"

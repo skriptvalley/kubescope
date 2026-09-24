@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { readBasePath, withBase } from "./base";
+import { readBasePath, routerBasename, withBase } from "./base";
 
 function docWithBase(href?: string): Document {
   const doc = document.implementation.createHTMLDocument("t");
@@ -46,5 +46,23 @@ describe("withBase", () => {
   it("does not touch absolute or protocol-relative URLs", () => {
     expect(withBase("https://example.dev/x", "/kubescope")).toBe("https://example.dev/x");
     expect(withBase("//example.dev/x", "/kubescope")).toBe("//example.dev/x");
+  });
+});
+
+describe("routerBasename", () => {
+  it("uses the mount when the page was loaded under it", () => {
+    expect(routerBasename("/kubescope/", "/kubescope")).toBe("/kubescope");
+    expect(routerBasename("/kubescope", "/kubescope")).toBe("/kubescope");
+    expect(routerBasename("/kubescope/resources/core/v1/pods", "/kubescope")).toBe("/kubescope");
+  });
+
+  it("falls back to / when reached without the prefix (e.g. a port-forward)", () => {
+    expect(routerBasename("/", "/kubescope")).toBe("/");
+    expect(routerBasename("/overview", "/kubescope")).toBe("/");
+    expect(routerBasename("/kubescopex/overview", "/kubescope")).toBe("/");
+  });
+
+  it("is / at the root", () => {
+    expect(routerBasename("/overview", "")).toBe("/");
   });
 });

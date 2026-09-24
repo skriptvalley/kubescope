@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/skriptvalley/kubescope/internal/kube"
+	"github.com/skriptvalley/kubescope/web"
 )
 
 // fakeProvider satisfies resources.Cluster for router-level tests.
@@ -269,6 +271,24 @@ func TestBasePathRouting(t *testing.T) {
 		})
 	}
 
+	// Escaped paths follow http.StripPrefix: the escaped form must carry the literal
+	// prefix, else the request is routed as-is (never half-stripped).
+	for name, path := range map[string]string{
+		"encoded separator after the prefix": "/kubescope%2Fapi/v1/nodes",
+		"encoded prefix":                     "/%6Bubescope/api/v1/nodes",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			assert.NotContains(t, rec.Body.String(), `{"items":[]}`, "must not reach the API route")
+		})
+	}
+	t.Run("escaped remainder keeps its escaping", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/kubescope/api/v1/nodes%2Fx", nil))
+		assert.Equal(t, http.StatusNotFound, rec.Code, "%2F stays a literal, not a separator")
+	})
+
 	t.Run("prefixed unknown api is still a json 404", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/kubescope/api/v1/nope", nil))
@@ -288,4 +308,23 @@ func TestBaseHrefAtRoot(t *testing.T) {
 func TestWithBaseHrefLeavesNonShellUntouched(t *testing.T) {
 	in := []byte("<html>kubescope spa</html>")
 	assert.Equal(t, in, withBaseHref(in, "/kubescope"))
+}
+
+func TestWithBaseHrefHeadWithAttributes(t *testing.T) {
+	out := string(withBaseHref([]byte(`<html><HEAD data-x="1"><title>t</title></HEAD></html>`), "/kubescope"))
+	assert.Contains(t, out, `<HEAD data-x="1"><base href="/kubescope/">`)
+	assert.NotContains(t, string(withBaseHref([]byte(`<html><header>x</header></html>`), "/k")), "<base", "<header> is not <head>")
+}
+
+// The real built shell must take the <base> tag — relative assets depend on it.
+// Skipped on a fresh clone, where web/dist holds only the embed placeholder.
+func TestWithBaseHrefOnBuiltShell(t *testing.T) {
+	index, err := fs.ReadFile(web.Dist(), "index.html")
+	if err != nil {
+		t.Skip("frontend not built (make fe-build)")
+	}
+	out := string(withBaseHref(index, "/kubescope"))
+	require.Contains(t, out, `<base href="/kubescope/">`)
+	assert.Less(t, strings.Index(out, `<base href`), strings.Index(out, `src="./assets/`),
+		"<base> must precede the first relative asset URL")
 }

@@ -27,3 +27,11 @@ export const basePath = readBasePath();
 export function withBase(path: string, base: string = basePath): string {
   return path.startsWith("/") && !path.startsWith("//") ? `${base}${path}` : path;
 }
+
+/** The router basename: the mount when the page was loaded under it, else "/".
+ *  The server also answers unprefixed paths (e.g. a port-forward that bypasses
+ *  the proxy), and a basename that matches nothing would render a blank page. */
+export function routerBasename(pathname: string = location.pathname, base: string = basePath): string {
+  if (base && (pathname === base || pathname.startsWith(`${base}/`))) return base;
+  return "/";
+}

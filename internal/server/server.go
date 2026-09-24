@@ -92,6 +92,10 @@ func New(opts Options) http.Handler {
 	// before any handler — including the SPA — is reached. /healthz is exempt
 	// from both.
 	r.Use(hostGuard(opts.ListenAddr))
+	// CSRF: non-safe cross-origin browser requests are refused before auth, so an
+	// ambient credential (Basic, or a proxy's session cookie) can't be ridden by
+	// another site's form (ADR-0012).
+	r.Use(crossOriginGuard())
 	r.Use(authGuard(opts.AuthMode, opts.BasicAuthUsername, opts.BasicAuthPassword, opts.Logger))
 
 	r.Get("/healthz", healthz)
@@ -267,24 +271,40 @@ func stripBasePath(base string, next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rest, ok := strings.CutPrefix(r.URL.Path, base)
-		if ok && (rest == "" || rest[0] == '/') {
-			r2 := r.Clone(r.Context())
-			if rest == "" {
-				rest = "/"
-			}
-			r2.URL.Path = rest
-			r2.URL.RawPath = ""
-			// chi routes on RawPath when set; an escaped path keeps its escaping
-			// minus the prefix (base has only unreserved characters).
-			if raw, ok := strings.CutPrefix(r.URL.RawPath, base); ok && raw != "" {
-				r2.URL.RawPath = raw
-			}
-			next.ServeHTTP(w, r2)
+		rest, ok := cutBase(r.URL.Path, base)
+		if !ok {
+			next.ServeHTTP(w, r) // already stripped (or not ours): route as-is
 			return
 		}
-		next.ServeHTTP(w, r)
+		// Like http.StripPrefix: when the path was escaped, the escaped form must
+		// carry the same literal prefix, or an encoded prefix (/%6Bubescope) or an
+		// encoded separator (/kubescope%2Fapi) would be read differently by the
+		// router (which routes on RawPath) than by this check.
+		rawRest := ""
+		if r.URL.RawPath != "" {
+			if rawRest, ok = cutBase(r.URL.RawPath, base); !ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = rest
+		r2.URL.RawPath = rawRest
+		next.ServeHTTP(w, r2)
 	})
+}
+
+// cutBase strips base from a path that is exactly base or base + "/…", returning
+// the remainder rooted at "/"; any other path (including "<base>x") is not ours.
+func cutBase(p, base string) (string, bool) {
+	rest, ok := strings.CutPrefix(p, base)
+	if !ok || (rest != "" && rest[0] != '/') {
+		return "", false
+	}
+	if rest == "" {
+		rest = "/"
+	}
+	return rest, true
 }
 
 func healthz(w http.ResponseWriter, _ *http.Request) {
