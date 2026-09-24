@@ -68,6 +68,9 @@ type Config struct {
 	// BasePath is the normalized sub-path the UI is served under ("" = root,
 	// else "/seg[/seg…]" with no trailing slash), ADR-0012.
 	BasePath string
+	// Warnings are non-fatal config notes for the caller to log at startup
+	// (e.g. an ignored Kubernetes service-link KUBESCOPE_PORT).
+	Warnings []string
 }
 
 type deps struct {
@@ -100,7 +103,7 @@ func Load(opts ...Option) (Config, error) {
 		opt(&d)
 	}
 
-	listenAddr, err := resolveListenAddr(d)
+	listenAddr, warnings, err := resolveListenAddr(d)
 	if err != nil {
 		return Config{}, err
 	}
@@ -160,6 +163,7 @@ func Load(opts ...Option) (Config, error) {
 	}
 
 	return Config{
+		Warnings:           warnings,
 		BasePath:           basePath,
 		ListenAddr:         listenAddr,
 		KubeconfigSources:  kubeconfigSources,
@@ -202,22 +206,40 @@ func normalizeBasePath(raw string) (string, error) {
 
 // resolveListenAddr combines KUBESCOPE_LISTEN_ADDR (default 127.0.0.1:8080)
 // with KUBESCOPE_PORT, which overrides only the port part.
-func resolveListenAddr(d deps) (string, error) {
+//
+// In Kubernetes a Service named "kubescope" makes the kubelet inject
+// KUBESCOPE_PORT=tcp://<clusterIP>:<port> (a Docker-style service link) into
+// every pod in its namespace. That value is not an operator's port override, so
+// it is ignored with a warning rather than failing startup.
+func resolveListenAddr(d deps) (string, []string, error) {
 	addr := defaultListenAddr
 	if raw, ok := d.lookupEnv(EnvListenAddr); ok {
 		addr = raw
 	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		return "", fmt.Errorf("parsing %s=%q: %w", EnvListenAddr, addr, err)
+		return "", nil, fmt.Errorf("parsing %s=%q: %w", EnvListenAddr, addr, err)
 	}
+	var warnings []string
 	if raw, ok := d.lookupEnv(EnvPort); ok {
-		port = raw
+		if isServiceLink(raw) {
+			warnings = append(warnings, fmt.Sprintf(
+				"ignoring %s=%q: a Kubernetes service link for a Service named kubescope, not a port (set enableServiceLinks: false on the pod to drop it)",
+				EnvPort, raw))
+		} else {
+			port = raw
+		}
 	}
 	if err := validatePort(port); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return net.JoinHostPort(host, port), nil
+	return net.JoinHostPort(host, port), warnings, nil
+}
+
+// isServiceLink reports a Kubernetes/Docker service-link value such as
+// "tcp://10.43.0.12:8080".
+func isServiceLink(v string) bool {
+	return strings.HasPrefix(v, "tcp://") || strings.HasPrefix(v, "udp://") || strings.HasPrefix(v, "sctp://")
 }
 
 func validatePort(port string) error {

@@ -88,6 +88,8 @@ contexts:
 current-context: in-cluster
 ```
 
+If the Service is named `kubescope`, Kubernetes injects `KUBESCOPE_PORT=tcp://…` service-link variables into the pod. Kubescope ignores that shape, but `enableServiceLinks: false` on the pod keeps the environment clean.
+
 With `KUBESCOPE_AUTH_MODE=none` the authentication must come from the proxy (e.g. Traefik ForwardAuth). Use a NetworkPolicy so that only the proxy can reach the pod; otherwise any workload in the cluster can use Kubescope's credentials.
 
 ## Connecting to clusters

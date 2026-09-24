@@ -224,6 +224,27 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+// A Service named "kubescope" injects KUBESCOPE_PORT=tcp://IP:PORT into its pods;
+// that must not crash startup or override the listen port.
+func TestLoadIgnoresServiceLinkPort(t *testing.T) {
+	cfg, err := Load(envMap(map[string]string{
+		EnvListenAddr: "0.0.0.0:8080",
+		EnvPort:       "tcp://10.43.223.87:8080",
+	}), noFiles(), homeDir("/home/u"))
+	require.NoError(t, err)
+	assert.Equal(t, "0.0.0.0:8080", cfg.ListenAddr)
+	require.Len(t, cfg.Warnings, 1)
+	assert.Contains(t, cfg.Warnings[0], "service link")
+
+	// a real override still applies, and garbage still fails
+	cfg, err = Load(envMap(map[string]string{EnvPort: "9090"}), noFiles(), homeDir("/home/u"))
+	require.NoError(t, err)
+	assert.Equal(t, "127.0.0.1:9090", cfg.ListenAddr)
+	assert.Empty(t, cfg.Warnings)
+	_, err = Load(envMap(map[string]string{EnvPort: "http-alt"}), noFiles(), homeDir("/home/u"))
+	require.Error(t, err)
+}
+
 // TestLoadBasePath covers KUBESCOPE_BASE_PATH normalization and validation (ADR-0012).
 func TestLoadBasePath(t *testing.T) {
 	tests := []struct {

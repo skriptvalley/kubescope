@@ -38,6 +38,9 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
+	for _, w := range cfg.Warnings {
+		logger.Warn("config", "note", w)
+	}
 
 	mgr := kube.NewManager(cfg.KubeconfigSources)
 
