@@ -7,7 +7,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
+	"strings"
 )
 
 // Canonical environment variable names. Do not invent new ones.
@@ -26,6 +28,9 @@ const (
 	// operator/password pair is the v1 credential model — see ADR-0005.
 	EnvAuthBasicUsername = "KUBESCOPE_AUTH_BASIC_USERNAME"
 	EnvAuthBasicPassword = "KUBESCOPE_AUTH_BASIC_PASSWORD"
+	// EnvBasePath is the URL sub-path Kubescope is served under behind a reverse
+	// proxy (e.g. /kubescope), ADR-0012. Default "" = the host root.
+	EnvBasePath = "KUBESCOPE_BASE_PATH"
 )
 
 const (
@@ -60,6 +65,9 @@ type Config struct {
 	// AllowKubeconfigSet enables the runtime set-kubeconfig endpoint (ADR-0007);
 	// default false.
 	AllowKubeconfigSet bool
+	// BasePath is the normalized sub-path the UI is served under ("" = root,
+	// else "/seg[/seg…]" with no trailing slash), ADR-0012.
+	BasePath string
 }
 
 type deps struct {
@@ -143,7 +151,16 @@ func Load(opts ...Option) (Config, error) {
 		}
 	}
 
+	basePath := ""
+	if raw, ok := d.lookupEnv(EnvBasePath); ok {
+		basePath, err = normalizeBasePath(raw)
+		if err != nil {
+			return Config{}, err
+		}
+	}
+
 	return Config{
+		BasePath:           basePath,
 		ListenAddr:         listenAddr,
 		KubeconfigSources:  kubeconfigSources,
 		ReadOnly:           readOnly,
@@ -152,6 +169,35 @@ func Load(opts ...Option) (Config, error) {
 		BasicAuthPassword:  basicPass,
 		AllowKubeconfigSet: allowKubeconfigSet,
 	}, nil
+}
+
+// basePathSegment is one URL path segment of a base path: unreserved characters
+// only, so the value is safe to write into the served HTML <base href> as-is.
+var basePathSegment = regexp.MustCompile(`^[A-Za-z0-9._~-]+$`)
+
+// normalizeBasePath turns KUBESCOPE_BASE_PATH into "" (root) or "/a/b" (leading
+// slash, no trailing slash). "", "/" mean the root. Segments are limited to URL
+// unreserved characters; "." / ".." and a first segment that would shadow the
+// server's own routes (api, healthz, assets) are rejected.
+func normalizeBasePath(raw string) (string, error) {
+	trimmed := strings.Trim(strings.TrimSpace(raw), "/")
+	if trimmed == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(strings.TrimSpace(raw), "/") {
+		return "", fmt.Errorf("parsing %s=%q: must start with '/' (e.g. /kubescope)", EnvBasePath, raw)
+	}
+	segs := strings.Split(trimmed, "/")
+	for _, seg := range segs {
+		if !basePathSegment.MatchString(seg) || seg == "." || seg == ".." {
+			return "", fmt.Errorf("parsing %s=%q: path segments may only use letters, digits and . _ ~ -", EnvBasePath, raw)
+		}
+	}
+	switch segs[0] {
+	case "api", "healthz", "assets":
+		return "", fmt.Errorf("parsing %s=%q: /%s is a Kubescope route; pick another prefix", EnvBasePath, raw, segs[0])
+	}
+	return "/" + trimmed, nil
 }
 
 // resolveListenAddr combines KUBESCOPE_LISTEN_ADDR (default 127.0.0.1:8080)

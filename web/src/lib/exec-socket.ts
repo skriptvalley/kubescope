@@ -7,6 +7,8 @@
 // Unlike the SSE client there is no auto-reconnect: an exec session is one-shot,
 // and reconnection is an explicit user action (a fresh session).
 
+import { withBase } from "@/lib/base";
+
 export type ExecStatus = "connecting" | "open" | "closed";
 
 /** A terminal end: a clean/coded process exit, or a structured error. */
@@ -118,5 +120,6 @@ function exitReason(code?: number): string {
 function toWebSocketUrl(path: string): string {
   const loc = globalThis.location;
   const protocol = loc.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${loc.host}${path}`;
+  // Same host, under the sub-path mount if any (ADR-0012).
+  return `${protocol}//${loc.host}${withBase(path)}`;
 }

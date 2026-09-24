@@ -224,6 +224,45 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+// TestLoadBasePath covers KUBESCOPE_BASE_PATH normalization and validation (ADR-0012).
+func TestLoadBasePath(t *testing.T) {
+	tests := []struct {
+		raw     string
+		want    string
+		wantErr string
+	}{
+		{raw: "/kubescope", want: "/kubescope"},
+		{raw: "/kubescope/", want: "/kubescope"},
+		{raw: "  /tools/kubescope// ", want: "/tools/kubescope"},
+		{raw: "/", want: ""},
+		{raw: "", want: ""},
+		{raw: "kubescope", wantErr: "must start with '/'"},
+		{raw: "/a b", wantErr: "path segments"},
+		{raw: `/x"><script>`, wantErr: "path segments"},
+		{raw: "/a/../b", wantErr: "path segments"},
+		{raw: "/a//b", wantErr: "path segments"},
+		{raw: "/api", wantErr: "Kubescope route"},
+		{raw: "/healthz/x", wantErr: "Kubescope route"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			cfg, err := Load(envMap(map[string]string{EnvBasePath: tt.raw}), noFiles(), homeDir("/home/u"))
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				assert.Contains(t, err.Error(), EnvBasePath)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, cfg.BasePath)
+		})
+	}
+
+	cfg, err := Load(envMap(map[string]string{}), noFiles(), homeDir("/home/u"))
+	require.NoError(t, err)
+	assert.Equal(t, "", cfg.BasePath, "unset serves at the root")
+}
+
 // TestStatExistsAcceptsFileAndDirectory pins the ADR-0008 change to the default
 // existence probe: the container mount point resolves whether it is a file or a
 // directory, and a truly absent path still reports missing.

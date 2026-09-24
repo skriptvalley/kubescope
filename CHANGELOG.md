@@ -6,6 +6,30 @@ All notable changes to Kubescope are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-09-24
+
+### Added
+
+- **Serve under a sub-path behind a reverse proxy (FB-19, ADR-0012).** New
+  `KUBESCOPE_BASE_PATH` (e.g. `/kubescope`): the shell gets a matching
+  `<base href>`, the build's asset URLs are relative, and the router basename plus
+  every API / SSE / WebSocket URL follow the mount — so one image runs at
+  `https://host/kubescope/` next to other apps. Works whether the proxy strips the
+  prefix (Traefik `stripPrefix`) or forwards it; invalid values fail at startup.
+  The README documents an in-cluster setup (ServiceAccount `tokenFile`
+  kubeconfig, auth at the proxy, NetworkPolicy). The router falls back to `/`
+  when the page is reached without the prefix (e.g. a port-forward).
+
+### Security
+
+- **CSRF guard on mutations.** Non-safe cross-origin browser requests are
+  refused with `403 cross_origin_rejected`, using Go's `http.CrossOriginProtection`
+  (`Sec-Fetch-Site`, else Origin vs Host). Behind an authenticating proxy (or with
+  cached Basic credentials), a body-less POST such as restart, cordon or drain can
+  no longer be triggered by a form on another site or a sibling subdomain.
+  Same-origin use, the exec WebSocket (which checks Origin itself) and non-browser
+  clients are unaffected.
+
 ### Fixed
 
 - **Shutdown no longer hangs with a browser tab open (FB-16).** `SIGTERM` used to

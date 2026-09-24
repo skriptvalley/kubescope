@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 
 import { Layout } from "@/components/layout";
+import { routerBasename } from "@/lib/base";
 import { EventsPage } from "@/pages/events";
 import { NodesPage } from "@/pages/nodes";
 import { OverviewPage } from "@/pages/overview";
@@ -48,7 +49,9 @@ const router = createBrowserRouter([
       { path: "resources/:group/:version/:resource/:name", element: <ResourceDetailPage /> },
     ],
   },
-]);
+  // Served under a sub-path (KUBESCOPE_BASE_PATH), routes and links resolve
+  // beneath it (ADR-0012); "/" at the root or when reached without the prefix.
+], { basename: routerBasename() });
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -4,6 +4,8 @@
 // for the live/stale indicator and the polling fallback. Higher-level hooks in
 // hooks/use-stream wrap this to patch the TanStack Query cache.
 
+import { withBase } from "@/lib/base";
+
 export type StreamStatus = "connecting" | "live" | "stale";
 
 /** Connectivity transition carried by a "status" watch event (FB-6 Story D).
@@ -70,7 +72,8 @@ export function openStream(url: string, callbacks: StreamCallbacks): () => void 
     }
 
     setStatus("connecting");
-    const es = new EventSourceImpl(url);
+    // Stream URLs are root-absolute app paths; mount them under the sub-path (ADR-0012).
+    const es = new EventSourceImpl(withBase(url));
     source = es;
 
     es.onopen = () => {

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -71,6 +72,12 @@ type Options struct {
 	ListenAddr string
 	// Dist is the built SPA (index.html at its root).
 	Dist fs.FS
+	// BasePath is the URL sub-path the UI is served under behind a reverse proxy
+	// ("" = root, else "/kubescope" — normalized by config, ADR-0012). The served
+	// index.html gets a matching <base href> so the SPA's assets, router and
+	// API/SSE/WebSocket URLs resolve under it, and requests are accepted both with
+	// the prefix still on (a proxy that forwards as-is) and already stripped.
+	BasePath string
 }
 
 // New builds the top-level HTTP handler.
@@ -85,6 +92,10 @@ func New(opts Options) http.Handler {
 	// before any handler — including the SPA — is reached. /healthz is exempt
 	// from both.
 	r.Use(hostGuard(opts.ListenAddr))
+	// CSRF: non-safe cross-origin browser requests are refused before auth, so an
+	// ambient credential (Basic, or a proxy's session cookie) can't be ridden by
+	// another site's form (ADR-0012).
+	r.Use(crossOriginGuard())
 	r.Use(authGuard(opts.AuthMode, opts.BasicAuthUsername, opts.BasicAuthPassword, opts.Logger))
 
 	r.Get("/healthz", healthz)
@@ -245,9 +256,55 @@ func New(opts Options) http.Handler {
 
 	// Everything else is the SPA: real files as-is, unknown paths fall back
 	// to index.html for client-side routing.
-	r.NotFound(spaHandler(opts.Dist).ServeHTTP)
+	r.NotFound(spaHandler(opts.Dist, opts.BasePath).ServeHTTP)
 
-	return r
+	return stripBasePath(opts.BasePath, r)
+}
+
+// stripBasePath lets Kubescope run under a sub-path whether or not the reverse
+// proxy strips it (ADR-0012): a request still carrying the prefix has it removed
+// before routing; one that arrives already stripped passes through unchanged. The
+// config layer rejects prefixes that would shadow the server's own top-level
+// routes, so the two cases cannot be confused.
+func stripBasePath(base string, next http.Handler) http.Handler {
+	if base == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rest, ok := cutBase(r.URL.Path, base)
+		if !ok {
+			next.ServeHTTP(w, r) // already stripped (or not ours): route as-is
+			return
+		}
+		// Like http.StripPrefix: when the path was escaped, the escaped form must
+		// carry the same literal prefix, or an encoded prefix (/%6Bubescope) or an
+		// encoded separator (/kubescope%2Fapi) would be read differently by the
+		// router (which routes on RawPath) than by this check.
+		rawRest := ""
+		if r.URL.RawPath != "" {
+			if rawRest, ok = cutBase(r.URL.RawPath, base); !ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = rest
+		r2.URL.RawPath = rawRest
+		next.ServeHTTP(w, r2)
+	})
+}
+
+// cutBase strips base from a path that is exactly base or base + "/…", returning
+// the remainder rooted at "/"; any other path (including "<base>x") is not ours.
+func cutBase(p, base string) (string, bool) {
+	rest, ok := strings.CutPrefix(p, base)
+	if !ok || (rest != "" && rest[0] != '/') {
+		return "", false
+	}
+	if rest == "" {
+		rest = "/"
+	}
+	return rest, true
 }
 
 func healthz(w http.ResponseWriter, _ *http.Request) {

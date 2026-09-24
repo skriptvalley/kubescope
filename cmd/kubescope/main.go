@@ -80,6 +80,7 @@ func run(logger *slog.Logger) error {
 		AllowKubeconfigSet: cfg.AllowKubeconfigSet,
 		ListenAddr:         cfg.ListenAddr,
 		Dist:               web.Dist(),
+		BasePath:           cfg.BasePath,
 	})
 
 	httpServer := &http.Server{
@@ -101,6 +102,7 @@ func run(logger *slog.Logger) error {
 			"kubeconfig_sources", cfg.KubeconfigSources,
 			"read_only", cfg.ReadOnly,
 			"auth_mode", cfg.AuthMode,
+			"base_path", cfg.BasePath,
 		)
 		if err := httpServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err

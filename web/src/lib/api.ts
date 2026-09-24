@@ -1,6 +1,8 @@
 // Typed API client — the single place the frontend talks HTTP. Components
 // never call fetch directly; they consume hooks that consume this module.
 
+import { withBase } from "@/lib/base";
+
 export interface NodeSummary {
   name: string;
   status: string;
@@ -573,7 +575,8 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  // Under a sub-path mount the API lives at <base>/api (ADR-0012).
+  const response = await fetch(withBase(path), {
     ...init,
     headers: { Accept: "application/json", ...init?.headers },
   });
