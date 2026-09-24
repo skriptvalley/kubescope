@@ -18,6 +18,22 @@ export interface ServerConfig {
   authMode: string;
 }
 
+/** Sign-in state (ADR-0013). In `session` mode the SPA shows the sign-in page
+ *  until `authenticated`; in `none`/`basic` it is always authenticated (Basic is
+ *  enforced by the browser before the SPA even loads). */
+export interface SessionState {
+  mode: "none" | "basic" | "session";
+  authenticated: boolean;
+  /** Whether the sign-in form asks for a username (else password only). */
+  usernameRequired: boolean;
+}
+
+/** Sign-in form body. `username` is sent only when the server requires one. */
+export interface SignInParams {
+  username?: string;
+  password: string;
+}
+
 interface NodeListResponse {
   items: NodeSummary[];
 }
@@ -652,6 +668,17 @@ export type StartPortForwardParams =
 
 export const api = {
   config: async (): Promise<ServerConfig> => request<ServerConfig>("/api/v1/config"),
+  session: {
+    get: async (): Promise<SessionState> => request<SessionState>("/api/v1/auth/session"),
+    signIn: async (params: SignInParams): Promise<SessionState> =>
+      request<SessionState>("/api/v1/auth/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+      }),
+    signOut: async (): Promise<SessionState> =>
+      request<SessionState>("/api/v1/auth/session", { method: "DELETE" }),
+  },
   /** First-run / connectivity posture (FB-6). Unguarded; always 200. */
   setup: {
     state: async (): Promise<SetupState> => request<SetupState>("/api/v1/setup"),

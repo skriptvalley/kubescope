@@ -34,7 +34,7 @@ flowchart LR
 
 | Component | Package | Responsibility |
 |---|---|---|
-| Router / SPA / middleware | `internal/server` | chi routes under `/api`, embedded SPA with fallback serving, read-only middleware, auth toggle (Sprint 8); optional sub-path mount — prefix stripped if present, `<base href>` injected into the shell ([adr/0012](adr/0012-sub-path-serving-behind-a-reverse-proxy.md)) |
+| Router / SPA / middleware | `internal/server` | chi routes under `/api`, embedded SPA with fallback serving, read-only middleware, auth modes — Basic (Sprint 8) or a session sign-in page + cookie ([adr/0013](adr/0013-session-sign-in-auth-mode.md)); optional sub-path mount — prefix stripped if present, `<base href>` injected into the shell ([adr/0012](adr/0012-sub-path-serving-behind-a-reverse-proxy.md)) |
 | Kubeconfig & context manager | `internal/kube` | Parse mounted kubeconfig, enumerate contexts, build + cache `rest.Config`/clients per context, per-context health checks |
 | Generic resource engine | `internal/resources` | Discovery of all API groups/resources incl. CRDs (cached, refreshable); dynamic-client get/list/patch/delete; cluster- vs namespace-scope handling ([adr/0003](adr/0003-generic-resource-access-via-discovery-and-dynamic-client.md)) |
 | Typed workload handlers | `internal/resources` | Shaped summaries for Pods/Deployments/StatefulSets/DaemonSets/ReplicaSets/Jobs/CronJobs; scale, rollout-restart, cordon/drain |

@@ -49,16 +49,18 @@ type Options struct {
 	// middleware — the bypass-proof guardrail from ADR-0005. The UI reads the
 	// same flag from /api/v1/config to disable controls, but this is the control.
 	ReadOnly bool
-	// AuthMode is surfaced to the frontend via /api/v1/config (none|basic) and
-	// selects the auth middleware. "basic" gates every route (except /healthz)
-	// with HTTP Basic auth using the credentials below (ADR-0005).
+	// AuthMode is surfaced to the frontend via /api/v1/config and
+	// /api/v1/auth/session (none|basic|session) and selects the auth middleware.
+	// "basic" gates every route (except /healthz) with HTTP Basic auth using the
+	// credentials below (ADR-0005); "session" serves a sign-in page and gates the
+	// API with an expiring cookie (ADR-0013).
 	AuthMode string
 	// AllowKubeconfigSet enables the runtime set-kubeconfig endpoint (ADR-0007).
 	// When false the endpoint 403s; the setup endpoint reports canSetKubeconfig
 	// accordingly. Read-only mode keeps the control off regardless.
 	AllowKubeconfigSet bool
-	// BasicAuthUsername/BasicAuthPassword are enforced when AuthMode is "basic".
-	// Never logged.
+	// BasicAuthUsername/BasicAuthPassword are the operator credential for the
+	// "basic" and "session" modes (session: username optional). Never logged.
 	BasicAuthUsername string
 	BasicAuthPassword string
 	// Drain is closed when the server begins shutting down. The long-lived
@@ -96,7 +98,11 @@ func New(opts Options) http.Handler {
 	// ambient credential (Basic, or a proxy's session cookie) can't be ridden by
 	// another site's form (ADR-0012).
 	r.Use(crossOriginGuard())
-	r.Use(authGuard(opts.AuthMode, opts.BasicAuthUsername, opts.BasicAuthPassword, opts.Logger))
+	var session *sessionAuth
+	if opts.AuthMode == "session" {
+		session = newSessionAuth(opts.BasicAuthUsername, opts.BasicAuthPassword, opts.BasePath, opts.Logger)
+	}
+	r.Use(authGuard(opts.AuthMode, opts.BasicAuthUsername, opts.BasicAuthPassword, session, opts.Logger))
 
 	r.Get("/healthz", healthz)
 
@@ -135,6 +141,13 @@ func New(opts Options) http.Handler {
 		// so the UI gates on one server-computed truth (ADR-0008).
 		canSetKubeconfig := opts.AllowKubeconfigSet && !opts.ReadOnly
 		api.Route("/v1", func(v1 chi.Router) {
+			// Sign-in state / sign-in / sign-out (ADR-0013). Session management, not
+			// cluster state, so it stays outside the read-only group; the auth guard
+			// lets this one route through unauthenticated.
+			sessGet, sessPost, sessDelete := sessionHandlers(opts.AuthMode, session, opts.Logger)
+			v1.Get("/auth/session", sessGet)
+			v1.Post("/auth/session", sessPost)
+			v1.Delete("/auth/session", sessDelete)
 			v1.Get("/nodes", resources.NodesHandler(opts.Kube, opts.Logger))
 			v1.Get("/contexts", resources.ContextsHandler(opts.Kube, opts.Logger))
 			v1.Post("/contexts/switch", resources.SwitchContextHandler(opts.Kube, opts.Logger))

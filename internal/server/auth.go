@@ -20,12 +20,18 @@ const healthzPath = "/healthz"
 //   - "basic": every route except /healthz requires HTTP Basic credentials that
 //     match username/password. Missing or wrong credentials get a 401 with a
 //     WWW-Authenticate challenge (so a browser prompts, and the SPA is gated too).
+//   - "session": a sign-in page and an expiring cookie (ADR-0013) — the SPA shell
+//     is public, every /api route but the session endpoint needs the cookie.
 //
 // Credentials are compared in constant time (SHA-256 of each side, so neither the
 // value nor its length leaks via timing) and are never logged. A failed attempt
 // logs only the path, remote address, and whether any credentials were presented
 // — never the submitted username or password.
-func authGuard(mode, username, password string, logger *slog.Logger) func(http.Handler) http.Handler {
+func authGuard(mode, username, password string, session *sessionAuth, logger *slog.Logger) func(http.Handler) http.Handler {
+	if mode == "session" && session != nil {
+		// Sign-in page + session cookie (ADR-0013); see sessionAuth.guard.
+		return session.guard
+	}
 	if mode != "basic" {
 		return func(next http.Handler) http.Handler { return next }
 	}

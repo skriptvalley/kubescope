@@ -1,10 +1,12 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 
+import { AuthGate } from "@/components/auth-gate";
 import { Layout } from "@/components/layout";
 import { routerBasename } from "@/lib/base";
+import { handleAuthError, retryUnlessUnauthenticated } from "@/lib/session";
 import { EventsPage } from "@/pages/events";
 import { NodesPage } from "@/pages/nodes";
 import { OverviewPage } from "@/pages/overview";
@@ -21,10 +23,14 @@ import "@fontsource-variable/geist-mono/wght.css";
 
 import "./index.css";
 
-const queryClient = new QueryClient({
+// Any API answer of 401 "unauthenticated" (an expired or cleared session,
+// ADR-0013) flips the cached sign-in state, and AuthGate shows the sign-in page.
+const queryClient: QueryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: (error) => handleAuthError(queryClient, error) }),
+  mutationCache: new MutationCache({ onError: (error) => handleAuthError(queryClient, error) }),
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: retryUnlessUnauthenticated,
       refetchOnWindowFocus: false,
     },
   },
@@ -33,7 +39,11 @@ const queryClient = new QueryClient({
 const router = createBrowserRouter([
   {
     path: "/",
-    element: <Layout />,
+    element: (
+      <AuthGate>
+        <Layout />
+      </AuthGate>
+    ),
     children: [
       { index: true, element: <Navigate to="/overview" replace /> },
       { path: "overview", element: <OverviewPage /> },

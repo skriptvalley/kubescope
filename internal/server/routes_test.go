@@ -36,12 +36,16 @@ var guardedRoutes = map[string]bool{
 
 // exemptMutatingRoutes are the mutating-method routes that deliberately stay
 // usable in read-only mode because they change no cluster state: the in-memory
-// context switch, and stopping a backend-local port-forward listener the user
-// already started (Sprint 6). Any new mutating-method route must be classified
-// into one of these two sets or TestMutatingRouteSurfaceIsClassified fails.
+// context switch, stopping a backend-local port-forward listener the user
+// already started (Sprint 6), and signing in/out of a session (ADR-0013 — a
+// read-only instance still needs its sign-in). Any new mutating-method route
+// must be classified into one of these two sets or
+// TestMutatingRouteSurfaceIsClassified fails.
 var exemptMutatingRoutes = map[string]bool{
 	"POST /api/v1/contexts/switch":     true,
 	"DELETE /api/v1/portforwards/{id}": true,
+	"POST /api/v1/auth/session":        true,
+	"DELETE /api/v1/auth/session":      true,
 }
 
 // TestMutatingRouteSurfaceIsClassified walks the actual router and asserts every

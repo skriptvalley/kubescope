@@ -6,6 +6,19 @@ All notable changes to Kubescope are documented here. Format follows
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-09-24
+
+### Added
+
+- **Session sign-in (FB-21, ADR-0013).** `KUBESCOPE_AUTH_MODE=session` adds a
+  Dusk-styled sign-in page, an expiring (12 h), HttpOnly, path-scoped session
+  cookie, and a sign-out button in the header. It replaces the browser's Basic
+  prompt with no new env vars: it uses the operator password
+  (`KUBESCOPE_AUTH_BASIC_PASSWORD`), and the username is optional (unset means
+  password-only). Sessions survive restarts; changing the password ends them. An
+  expired session anywhere in the app returns to the sign-in page, and signing
+  out drops every cached cluster response.
+
 ## [1.1.1] — 2026-09-24
 
 ### Fixed

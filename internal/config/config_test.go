@@ -165,6 +165,34 @@ func TestLoad(t *testing.T) {
 			wantErr: "requires both",
 		},
 		{
+			name: "auth mode session, password only",
+			env: map[string]string{
+				EnvAuthMode:          "session",
+				EnvAuthBasicPassword: "s3cret",
+			},
+			want: Config{
+				ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/home/u/.kube/config"},
+				AuthMode: "session", BasicAuthPassword: "s3cret",
+			},
+		},
+		{
+			name: "auth mode session with username",
+			env: map[string]string{
+				EnvAuthMode:          "session",
+				EnvAuthBasicUsername: "admin",
+				EnvAuthBasicPassword: "s3cret",
+			},
+			want: Config{
+				ListenAddr: "127.0.0.1:8080", KubeconfigSources: []string{"/home/u/.kube/config"},
+				AuthMode: "session", BasicAuthUsername: "admin", BasicAuthPassword: "s3cret",
+			},
+		},
+		{
+			name:    "auth mode session without password rejected",
+			env:     map[string]string{EnvAuthMode: "session", EnvAuthBasicUsername: "admin"},
+			wantErr: "session requires",
+		},
+		{
 			name:    "auth mode oidc not implemented",
 			env:     map[string]string{EnvAuthMode: "oidc"},
 			wantErr: "not implemented",
